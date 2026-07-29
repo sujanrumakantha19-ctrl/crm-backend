@@ -1,0 +1,1398 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<coverage generated="1784449777486" clover="3.2.0">
+  <project timestamp="1784449777487" name="All files">
+    <metrics statements="1218" coveredstatements="1109" conditionals="473" coveredconditionals="368" methods="148" coveredmethods="139" elements="1839" coveredelements="1616" complexity="0" loc="1218" ncloc="1218" packages="8" files="50" classes="50"/>
+    <package name="config">
+      <metrics statements="37" coveredstatements="32" conditionals="33" coveredconditionals="29" methods="5" coveredmethods="4"/>
+      <file name="db.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\config\db.js">
+        <metrics statements="37" coveredstatements="32" conditionals="33" coveredconditionals="29" methods="5" coveredmethods="4"/>
+        <line num="1" count="39" type="stmt"/>
+        <line num="2" count="39" type="stmt"/>
+        <line num="3" count="39" type="stmt"/>
+        <line num="4" count="39" type="stmt"/>
+        <line num="8" count="39" type="stmt"/>
+        <line num="11" count="39" type="stmt"/>
+        <line num="12" count="397" type="stmt"/>
+        <line num="15" count="443" type="stmt"/>
+        <line num="16" count="443" type="stmt"/>
+        <line num="17" count="443" type="stmt"/>
+        <line num="19" count="443" type="cond" truecount="1" falsecount="1"/>
+        <line num="20" count="443" type="cond" truecount="1" falsecount="0"/>
+        <line num="21" count="497" type="cond" truecount="3" falsecount="1"/>
+        <line num="23" count="497" type="stmt"/>
+        <line num="24" count="3869" type="cond" truecount="2" falsecount="0"/>
+        <line num="25" count="3869" type="stmt"/>
+        <line num="27" count="3869" type="cond" truecount="4" falsecount="0"/>
+        <line num="28" count="94" type="stmt"/>
+        <line num="30" count="94" type="cond" truecount="2" falsecount="0"/>
+        <line num="31" count="3" type="cond" truecount="1" falsecount="1"/>
+        <line num="33" count="91" type="stmt"/>
+        <line num="36" count="94" type="cond" truecount="5" falsecount="0"/>
+        <line num="37" count="1" type="stmt"/>
+        <line num="39" count="93" type="cond" truecount="2" falsecount="0"/>
+        <line num="40" count="93" type="cond" truecount="1" falsecount="1"/>
+        <line num="41" count="93" type="stmt"/>
+        <line num="44" count="3775" type="cond" truecount="7" falsecount="0"/>
+        <line num="45" count="54" type="stmt"/>
+        <line num="50" count="443" type="stmt"/>
+        <line num="52" count="443" type="stmt"/>
+        <line num="57" count="39" type="stmt"/>
+        <line num="58" count="0" type="stmt"/>
+        <line num="59" count="0" type="stmt"/>
+        <line num="60" count="0" type="stmt"/>
+        <line num="62" count="0" type="stmt"/>
+        <line num="63" count="0" type="stmt"/>
+        <line num="67" count="39" type="stmt"/>
+      </file>
+    </package>
+    <package name="controllers">
+      <metrics statements="701" coveredstatements="638" conditionals="326" coveredconditionals="262" methods="105" coveredmethods="102"/>
+      <file name="activityLogController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\activityLogController.js">
+        <metrics statements="42" coveredstatements="42" conditionals="16" coveredconditionals="16" methods="7" coveredmethods="7"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="8" count="23" type="stmt"/>
+        <line num="9" count="1" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="2" type="stmt"/>
+        <line num="18" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="19" count="1" type="stmt"/>
+        <line num="22" count="1" type="stmt"/>
+        <line num="31" count="23" type="stmt"/>
+        <line num="32" count="1" type="stmt"/>
+        <line num="34" count="1" type="stmt"/>
+        <line num="43" count="23" type="stmt"/>
+        <line num="44" count="3" type="stmt"/>
+        <line num="46" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="47" count="1" type="stmt"/>
+        <line num="50" count="2" type="stmt"/>
+        <line num="52" count="2" type="stmt"/>
+        <line num="61" count="23" type="stmt"/>
+        <line num="62" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="63" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="64" count="1" type="stmt"/>
+        <line num="65" count="1" type="stmt"/>
+        <line num="66" count="1" type="stmt"/>
+        <line num="67" count="1" type="stmt"/>
+        <line num="69" count="1" type="stmt"/>
+        <line num="80" count="23" type="stmt"/>
+        <line num="81" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="82" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="83" count="2" type="stmt"/>
+        <line num="84" count="2" type="stmt"/>
+        <line num="85" count="2" type="stmt"/>
+        <line num="86" count="2" type="stmt"/>
+        <line num="88" count="2" type="stmt"/>
+        <line num="99" count="23" type="stmt"/>
+        <line num="100" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="101" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="102" count="3" type="stmt"/>
+        <line num="103" count="3" type="stmt"/>
+        <line num="104" count="3" type="stmt"/>
+        <line num="106" count="3" type="stmt"/>
+      </file>
+      <file name="attendanceController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\attendanceController.js">
+        <metrics statements="52" coveredstatements="52" conditionals="20" coveredconditionals="20" methods="9" coveredmethods="9"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="8" count="23" type="stmt"/>
+        <line num="9" count="1" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="2" type="stmt"/>
+        <line num="22" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="23" count="1" type="stmt"/>
+        <line num="26" count="1" type="stmt"/>
+        <line num="35" count="23" type="stmt"/>
+        <line num="36" count="4" type="stmt"/>
+        <line num="38" count="4" type="stmt"/>
+        <line num="47" count="23" type="stmt"/>
+        <line num="48" count="6" type="stmt"/>
+        <line num="50" count="6" type="cond" truecount="2" falsecount="0"/>
+        <line num="51" count="1" type="stmt"/>
+        <line num="54" count="5" type="stmt"/>
+        <line num="68" count="55" type="cond" truecount="2" falsecount="0"/>
+        <line num="70" count="5" type="stmt"/>
+        <line num="75" count="5" type="stmt"/>
+        <line num="84" count="23" type="stmt"/>
+        <line num="85" count="3" type="stmt"/>
+        <line num="87" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="88" count="1" type="stmt"/>
+        <line num="91" count="2" type="stmt"/>
+        <line num="93" count="2" type="stmt"/>
+        <line num="102" count="23" type="stmt"/>
+        <line num="103" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="104" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="105" count="3" type="stmt"/>
+        <line num="106" count="3" type="stmt"/>
+        <line num="107" count="3" type="stmt"/>
+        <line num="108" count="3" type="stmt"/>
+        <line num="110" count="3" type="stmt"/>
+        <line num="121" count="23" type="stmt"/>
+        <line num="122" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="123" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="124" count="3" type="stmt"/>
+        <line num="125" count="3" type="stmt"/>
+        <line num="126" count="3" type="stmt"/>
+        <line num="127" count="3" type="stmt"/>
+        <line num="129" count="3" type="stmt"/>
+        <line num="140" count="23" type="stmt"/>
+        <line num="141" count="2" type="stmt"/>
+        <line num="142" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="143" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="144" count="2" type="stmt"/>
+        <line num="145" count="2" type="stmt"/>
+        <line num="146" count="2" type="stmt"/>
+        <line num="147" count="2" type="stmt"/>
+        <line num="149" count="2" type="stmt"/>
+      </file>
+      <file name="authController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\authController.js">
+        <metrics statements="105" coveredstatements="84" conditionals="48" coveredconditionals="38" methods="11" coveredmethods="11"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="4" count="23" type="stmt"/>
+        <line num="9" count="23" type="stmt"/>
+        <line num="20" count="9" type="stmt"/>
+        <line num="24" count="9" type="stmt"/>
+        <line num="27" count="9" type="stmt"/>
+        <line num="42" count="8" type="stmt"/>
+        <line num="44" count="8" type="stmt"/>
+        <line num="63" count="23" type="stmt"/>
+        <line num="64" count="7" type="stmt"/>
+        <line num="66" count="7" type="cond" truecount="3" falsecount="1"/>
+        <line num="67" count="0" type="stmt"/>
+        <line num="70" count="7" type="stmt"/>
+        <line num="72" count="7" type="cond" truecount="2" falsecount="0"/>
+        <line num="73" count="3" type="stmt"/>
+        <line num="76" count="4" type="stmt"/>
+        <line num="78" count="4" type="cond" truecount="2" falsecount="0"/>
+        <line num="79" count="1" type="stmt"/>
+        <line num="82" count="3" type="stmt"/>
+        <line num="84" count="3" type="stmt"/>
+        <line num="104" count="23" type="stmt"/>
+        <line num="105" count="2" type="stmt"/>
+        <line num="107" count="2" type="stmt"/>
+        <line num="116" count="23" type="stmt"/>
+        <line num="117" count="2" type="stmt"/>
+        <line num="119" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="120" count="0" type="stmt"/>
+        <line num="123" count="2" type="stmt"/>
+        <line num="126" count="2" type="stmt"/>
+        <line num="128" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="130" count="2" type="stmt"/>
+        <line num="134" count="0" type="stmt"/>
+        <line num="136" count="0" type="stmt"/>
+        <line num="139" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="140" count="0" type="stmt"/>
+        <line num="142" count="0" type="stmt"/>
+        <line num="148" count="0" type="stmt"/>
+        <line num="149" count="0" type="stmt"/>
+        <line num="150" count="0" type="stmt"/>
+        <line num="156" count="0" type="stmt"/>
+        <line num="161" count="0" type="stmt"/>
+        <line num="162" count="0" type="stmt"/>
+        <line num="163" count="0" type="stmt"/>
+        <line num="164" count="0" type="stmt"/>
+        <line num="166" count="0" type="stmt"/>
+        <line num="168" count="0" type="stmt"/>
+        <line num="175" count="23" type="stmt"/>
+        <line num="176" count="3" type="stmt"/>
+        <line num="178" count="3" type="cond" truecount="3" falsecount="1"/>
+        <line num="179" count="0" type="stmt"/>
+        <line num="183" count="3" type="stmt"/>
+        <line num="188" count="3" type="stmt"/>
+        <line num="193" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="194" count="2" type="stmt"/>
+        <line num="198" count="1" type="stmt"/>
+        <line num="199" count="1" type="stmt"/>
+        <line num="200" count="1" type="stmt"/>
+        <line num="201" count="1" type="stmt"/>
+        <line num="204" count="1" type="stmt"/>
+        <line num="213" count="23" type="stmt"/>
+        <line num="214" count="5" type="stmt"/>
+        <line num="215" count="5" type="stmt"/>
+        <line num="216" count="5" type="cond" truecount="2" falsecount="0"/>
+        <line num="217" count="5" type="cond" truecount="1" falsecount="1"/>
+        <line num="218" count="5" type="cond" truecount="2" falsecount="0"/>
+        <line num="219" count="5" type="cond" truecount="2" falsecount="0"/>
+        <line num="220" count="5" type="cond" truecount="2" falsecount="0"/>
+        <line num="222" count="5" type="stmt"/>
+        <line num="227" count="5" type="stmt"/>
+        <line num="233" count="23" type="stmt"/>
+        <line num="234" count="5" type="stmt"/>
+        <line num="236" count="5" type="cond" truecount="3" falsecount="1"/>
+        <line num="237" count="0" type="stmt"/>
+        <line num="240" count="5" type="stmt"/>
+        <line num="242" count="5" type="stmt"/>
+        <line num="243" count="5" type="cond" truecount="2" falsecount="0"/>
+        <line num="244" count="2" type="stmt"/>
+        <line num="247" count="3" type="stmt"/>
+        <line num="248" count="3" type="stmt"/>
+        <line num="250" count="3" type="stmt"/>
+        <line num="251" count="3" type="stmt"/>
+        <line num="257" count="23" type="stmt"/>
+        <line num="258" count="9" type="stmt"/>
+        <line num="260" count="9" type="cond" truecount="2" falsecount="0"/>
+        <line num="261" count="1" type="stmt"/>
+        <line num="264" count="8" type="stmt"/>
+        <line num="265" count="8" type="cond" truecount="1" falsecount="1"/>
+        <line num="266" count="0" type="stmt"/>
+        <line num="270" count="8" type="stmt"/>
+        <line num="271" count="8" type="cond" truecount="2" falsecount="0"/>
+        <line num="272" count="6" type="cond" truecount="2" falsecount="0"/>
+        <line num="273" count="6" type="stmt"/>
+        <line num="276" count="8" type="stmt"/>
+        <line num="286" count="23" type="stmt"/>
+        <line num="287" count="3" type="stmt"/>
+        <line num="289" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="290" count="1" type="stmt"/>
+        <line num="293" count="2" type="stmt"/>
+        <line num="294" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="295" count="0" type="stmt"/>
+        <line num="298" count="2" type="stmt"/>
+        <line num="299" count="2" type="stmt"/>
+        <line num="301" count="2" type="stmt"/>
+      </file>
+      <file name="channelPartnerController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\channelPartnerController.js">
+        <metrics statements="45" coveredstatements="39" conditionals="18" coveredconditionals="14" methods="9" coveredmethods="8"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="8" count="23" type="stmt"/>
+        <line num="9" count="1" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="0" type="stmt"/>
+        <line num="18" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="19" count="0" type="stmt"/>
+        <line num="22" count="0" type="stmt"/>
+        <line num="31" count="23" type="stmt"/>
+        <line num="32" count="4" type="stmt"/>
+        <line num="47" count="48" type="cond" truecount="2" falsecount="0"/>
+        <line num="49" count="4" type="stmt"/>
+        <line num="51" count="4" type="stmt"/>
+        <line num="60" count="23" type="stmt"/>
+        <line num="61" count="2" type="stmt"/>
+        <line num="63" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="64" count="0" type="stmt"/>
+        <line num="67" count="2" type="stmt"/>
+        <line num="83" count="26" type="cond" truecount="2" falsecount="0"/>
+        <line num="85" count="2" type="stmt"/>
+        <line num="90" count="2" type="stmt"/>
+        <line num="99" count="23" type="stmt"/>
+        <line num="100" count="2" type="stmt"/>
+        <line num="102" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="103" count="0" type="stmt"/>
+        <line num="106" count="2" type="stmt"/>
+        <line num="108" count="2" type="stmt"/>
+        <line num="117" count="23" type="stmt"/>
+        <line num="118" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="119" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="120" count="1" type="stmt"/>
+        <line num="121" count="1" type="stmt"/>
+        <line num="122" count="1" type="stmt"/>
+        <line num="123" count="1" type="stmt"/>
+        <line num="125" count="1" type="stmt"/>
+        <line num="136" count="23" type="stmt"/>
+        <line num="137" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="138" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="139" count="2" type="stmt"/>
+        <line num="140" count="2" type="stmt"/>
+        <line num="141" count="2" type="stmt"/>
+        <line num="142" count="2" type="stmt"/>
+        <line num="144" count="2" type="stmt"/>
+      </file>
+      <file name="groupController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\groupController.js">
+        <metrics statements="51" coveredstatements="44" conditionals="18" coveredconditionals="11" methods="8" coveredmethods="8"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="8" count="23" type="stmt"/>
+        <line num="9" count="1" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="2" type="stmt"/>
+        <line num="18" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="19" count="0" type="stmt"/>
+        <line num="22" count="2" type="stmt"/>
+        <line num="31" count="23" type="stmt"/>
+        <line num="32" count="2" type="stmt"/>
+        <line num="34" count="2" type="stmt"/>
+        <line num="43" count="23" type="stmt"/>
+        <line num="44" count="1" type="stmt"/>
+        <line num="46" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="47" count="0" type="stmt"/>
+        <line num="50" count="1" type="stmt"/>
+        <line num="56" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="58" count="1" type="stmt"/>
+        <line num="63" count="1" type="stmt"/>
+        <line num="72" count="23" type="stmt"/>
+        <line num="73" count="2" type="stmt"/>
+        <line num="75" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="76" count="0" type="stmt"/>
+        <line num="80" count="2" type="stmt"/>
+        <line num="81" count="2" type="stmt"/>
+        <line num="83" count="2" type="stmt"/>
+        <line num="85" count="2" type="stmt"/>
+        <line num="94" count="23" type="stmt"/>
+        <line num="95" count="4" type="stmt"/>
+        <line num="97" count="4" type="cond" truecount="1" falsecount="1"/>
+        <line num="98" count="0" type="stmt"/>
+        <line num="101" count="4" type="stmt"/>
+        <line num="103" count="4" type="cond" truecount="1" falsecount="1"/>
+        <line num="104" count="0" type="stmt"/>
+        <line num="108" count="4" type="cond" truecount="2" falsecount="0"/>
+        <line num="109" count="1" type="stmt"/>
+        <line num="112" count="3" type="stmt"/>
+        <line num="113" count="3" type="stmt"/>
+        <line num="115" count="3" type="stmt"/>
+        <line num="124" count="23" type="stmt"/>
+        <line num="125" count="2" type="stmt"/>
+        <line num="127" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="128" count="0" type="stmt"/>
+        <line num="131" count="2" type="stmt"/>
+        <line num="133" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="134" count="0" type="stmt"/>
+        <line num="137" count="2" type="stmt"/>
+        <line num="138" count="2" type="stmt"/>
+        <line num="140" count="2" type="stmt"/>
+      </file>
+      <file name="leadController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\leadController.js">
+        <metrics statements="53" coveredstatements="53" conditionals="22" coveredconditionals="22" methods="10" coveredmethods="10"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="8" count="23" type="stmt"/>
+        <line num="9" count="16" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="7" type="stmt"/>
+        <line num="30" count="6" type="cond" truecount="2" falsecount="0"/>
+        <line num="31" count="3" type="stmt"/>
+        <line num="34" count="3" type="stmt"/>
+        <line num="43" count="23" type="stmt"/>
+        <line num="44" count="15" type="stmt"/>
+        <line num="70" count="345" type="cond" truecount="2" falsecount="0"/>
+        <line num="72" count="15" type="stmt"/>
+        <line num="74" count="15" type="stmt"/>
+        <line num="83" count="23" type="stmt"/>
+        <line num="84" count="12" type="stmt"/>
+        <line num="86" count="12" type="cond" truecount="2" falsecount="0"/>
+        <line num="87" count="1" type="stmt"/>
+        <line num="90" count="11" type="stmt"/>
+        <line num="116" count="253" type="cond" truecount="2" falsecount="0"/>
+        <line num="118" count="11" type="stmt"/>
+        <line num="123" count="11" type="stmt"/>
+        <line num="132" count="23" type="stmt"/>
+        <line num="133" count="2" type="stmt"/>
+        <line num="135" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="136" count="1" type="stmt"/>
+        <line num="139" count="1" type="stmt"/>
+        <line num="141" count="1" type="stmt"/>
+        <line num="150" count="23" type="stmt"/>
+        <line num="151" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="152" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="153" count="2" type="stmt"/>
+        <line num="154" count="2" type="stmt"/>
+        <line num="155" count="2" type="stmt"/>
+        <line num="156" count="2" type="stmt"/>
+        <line num="158" count="2" type="stmt"/>
+        <line num="169" count="23" type="stmt"/>
+        <line num="170" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="171" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="172" count="3" type="stmt"/>
+        <line num="173" count="3" type="stmt"/>
+        <line num="174" count="3" type="stmt"/>
+        <line num="175" count="3" type="stmt"/>
+        <line num="177" count="3" type="stmt"/>
+        <line num="188" count="23" type="stmt"/>
+        <line num="189" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="190" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="191" count="1" type="stmt"/>
+        <line num="192" count="1" type="stmt"/>
+        <line num="193" count="1" type="stmt"/>
+        <line num="194" count="1" type="stmt"/>
+        <line num="196" count="1" type="stmt"/>
+      </file>
+      <file name="notificationController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\notificationController.js">
+        <metrics statements="88" coveredstatements="81" conditionals="44" coveredconditionals="30" methods="12" coveredmethods="12"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="4" count="23" type="stmt"/>
+        <line num="5" count="23" type="stmt"/>
+        <line num="8" count="23" type="stmt"/>
+        <line num="9" count="12" type="stmt"/>
+        <line num="10" count="12" type="stmt"/>
+        <line num="11" count="12" type="stmt"/>
+        <line num="12" count="12" type="stmt"/>
+        <line num="13" count="12" type="stmt"/>
+        <line num="15" count="12" type="stmt"/>
+        <line num="16" count="12" type="stmt"/>
+        <line num="19" count="12" type="stmt"/>
+        <line num="24" count="12" type="stmt"/>
+        <line num="25" count="3" type="cond" truecount="1" falsecount="1"/>
+        <line num="26" count="3" type="stmt"/>
+        <line num="27" count="3" type="cond" truecount="1" falsecount="1"/>
+        <line num="28" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="30" count="0" type="stmt"/>
+        <line num="33" count="12" type="stmt"/>
+        <line num="34" count="3" type="stmt"/>
+        <line num="42" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="43" count="2" type="stmt"/>
+        <line num="57" count="12" type="stmt"/>
+        <line num="62" count="12" type="stmt"/>
+        <line num="63" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="65" count="1" type="stmt"/>
+        <line num="66" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="67" count="1" type="stmt"/>
+        <line num="68" count="1" type="stmt"/>
+        <line num="69" count="1" type="cond" truecount="3" falsecount="1"/>
+        <line num="72" count="0" type="stmt"/>
+        <line num="73" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="74" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="76" count="0" type="stmt"/>
+        <line num="79" count="12" type="stmt"/>
+        <line num="80" count="1" type="stmt"/>
+        <line num="88" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="89" count="1" type="stmt"/>
+        <line num="102" count="0" type="stmt"/>
+        <line num="109" count="23" type="stmt"/>
+        <line num="110" count="4" type="cond" truecount="3" falsecount="1"/>
+        <line num="111" count="4" type="stmt"/>
+        <line num="113" count="4" type="stmt"/>
+        <line num="119" count="23" type="stmt"/>
+        <line num="120" count="2" type="stmt"/>
+        <line num="122" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="123" count="1" type="stmt"/>
+        <line num="126" count="1" type="stmt"/>
+        <line num="135" count="23" type="stmt"/>
+        <line num="136" count="6" type="stmt"/>
+        <line num="138" count="6" type="stmt"/>
+        <line num="140" count="6" type="stmt"/>
+        <line num="149" count="23" type="stmt"/>
+        <line num="150" count="3" type="stmt"/>
+        <line num="152" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="153" count="1" type="stmt"/>
+        <line num="157" count="2" type="stmt"/>
+        <line num="161" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="163" count="2" type="stmt"/>
+        <line num="168" count="2" type="stmt"/>
+        <line num="177" count="23" type="stmt"/>
+        <line num="178" count="3" type="stmt"/>
+        <line num="180" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="181" count="1" type="stmt"/>
+        <line num="184" count="2" type="stmt"/>
+        <line num="186" count="2" type="stmt"/>
+        <line num="195" count="23" type="stmt"/>
+        <line num="196" count="8" type="cond" truecount="3" falsecount="1"/>
+        <line num="197" count="8" type="stmt"/>
+        <line num="200" count="8" type="cond" truecount="2" falsecount="0"/>
+        <line num="201" count="8" type="cond" truecount="2" falsecount="0"/>
+        <line num="202" count="8" type="stmt"/>
+        <line num="203" count="8" type="stmt"/>
+        <line num="204" count="8" type="stmt"/>
+        <line num="205" count="8" type="stmt"/>
+        <line num="207" count="8" type="stmt"/>
+        <line num="218" count="23" type="stmt"/>
+        <line num="219" count="3" type="stmt"/>
+        <line num="221" count="3" type="cond" truecount="1" falsecount="1"/>
+        <line num="222" count="0" type="stmt"/>
+        <line num="225" count="3" type="stmt"/>
+        <line num="226" count="3" type="stmt"/>
+        <line num="228" count="3" type="stmt"/>
+        <line num="237" count="23" type="stmt"/>
+        <line num="238" count="3" type="stmt"/>
+        <line num="240" count="3" type="stmt"/>
+      </file>
+      <file name="plotController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\plotController.js">
+        <metrics statements="102" coveredstatements="99" conditionals="64" coveredconditionals="58" methods="13" coveredmethods="13"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="4" count="23" type="stmt"/>
+        <line num="5" count="23" type="stmt"/>
+        <line num="6" count="23" type="stmt"/>
+        <line num="11" count="23" type="stmt"/>
+        <line num="12" count="14" type="stmt"/>
+        <line num="18" count="23" type="stmt"/>
+        <line num="19" count="3" type="stmt"/>
+        <line num="25" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="26" count="2" type="stmt"/>
+        <line num="29" count="1" type="stmt"/>
+        <line num="38" count="23" type="stmt"/>
+        <line num="39" count="2" type="stmt"/>
+        <line num="41" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="42" count="0" type="stmt"/>
+        <line num="45" count="2" type="stmt"/>
+        <line num="47" count="1" type="stmt"/>
+        <line num="53" count="1" type="cond" truecount="2" falsecount="2"/>
+        <line num="54" count="1" type="stmt"/>
+        <line num="60" count="0" type="stmt"/>
+        <line num="67" count="23" type="stmt"/>
+        <line num="68" count="3" type="stmt"/>
+        <line num="70" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="71" count="1" type="stmt"/>
+        <line num="74" count="2" type="stmt"/>
+        <line num="89" count="24" type="cond" truecount="2" falsecount="0"/>
+        <line num="91" count="2" type="stmt"/>
+        <line num="96" count="2" type="stmt"/>
+        <line num="105" count="23" type="stmt"/>
+        <line num="106" count="18" type="stmt"/>
+        <line num="107" count="18" type="cond" truecount="2" falsecount="0"/>
+        <line num="132" count="18" type="stmt"/>
+        <line num="138" count="18" type="cond" truecount="2" falsecount="0"/>
+        <line num="139" count="4" type="stmt"/>
+        <line num="143" count="14" type="cond" truecount="2" falsecount="0"/>
+        <line num="144" count="11" type="stmt"/>
+        <line num="145" count="11" type="stmt"/>
+        <line num="146" count="11" type="cond" truecount="1" falsecount="1"/>
+        <line num="147" count="11" type="stmt"/>
+        <line num="148" count="11" type="stmt"/>
+        <line num="149" count="11" type="stmt"/>
+        <line num="161" count="0" type="stmt"/>
+        <line num="165" count="14" type="stmt"/>
+        <line num="174" count="23" type="stmt"/>
+        <line num="175" count="8" type="stmt"/>
+        <line num="176" count="8" type="cond" truecount="2" falsecount="0"/>
+        <line num="177" count="7" type="cond" truecount="4" falsecount="0"/>
+        <line num="178" count="2" type="stmt"/>
+        <line num="181" count="5" type="stmt"/>
+        <line num="182" count="5" type="stmt"/>
+        <line num="183" count="5" type="stmt"/>
+        <line num="189" count="5" type="stmt"/>
+        <line num="190" count="5" type="stmt"/>
+        <line num="192" count="5" type="stmt"/>
+        <line num="198" count="23" type="stmt"/>
+        <line num="199" count="6" type="stmt"/>
+        <line num="200" count="6" type="cond" truecount="2" falsecount="0"/>
+        <line num="201" count="5" type="cond" truecount="4" falsecount="0"/>
+        <line num="202" count="1" type="stmt"/>
+        <line num="205" count="4" type="stmt"/>
+        <line num="206" count="4" type="stmt"/>
+        <line num="207" count="4" type="stmt"/>
+        <line num="209" count="4" type="stmt"/>
+        <line num="215" count="23" type="stmt"/>
+        <line num="216" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="217" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="218" count="3" type="stmt"/>
+        <line num="219" count="3" type="stmt"/>
+        <line num="220" count="3" type="stmt"/>
+        <line num="221" count="3" type="stmt"/>
+        <line num="225" count="3" type="stmt"/>
+        <line num="236" count="23" type="stmt"/>
+        <line num="237" count="2" type="stmt"/>
+        <line num="239" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="240" count="1" type="stmt"/>
+        <line num="243" count="1" type="stmt"/>
+        <line num="245" count="1" type="stmt"/>
+        <line num="254" count="23" type="stmt"/>
+        <line num="255" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="256" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="257" count="1" type="stmt"/>
+        <line num="258" count="1" type="stmt"/>
+        <line num="259" count="1" type="stmt"/>
+        <line num="260" count="1" type="stmt"/>
+        <line num="262" count="1" type="stmt"/>
+        <line num="278" count="23" type="stmt"/>
+        <line num="279" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="280" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="281" count="3" type="stmt"/>
+        <line num="283" count="3" type="stmt"/>
+        <line num="285" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="286" count="1" type="stmt"/>
+        <line num="289" count="3" type="stmt"/>
+        <line num="290" count="3" type="stmt"/>
+        <line num="294" count="3" type="stmt"/>
+        <line num="311" count="23" type="stmt"/>
+        <line num="312" count="3" type="stmt"/>
+        <line num="314" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="315" count="1" type="stmt"/>
+        <line num="318" count="2" type="stmt"/>
+      </file>
+      <file name="projectController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\projectController.js">
+        <metrics statements="56" coveredstatements="56" conditionals="26" coveredconditionals="21" methods="9" coveredmethods="9"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="8" count="23" type="stmt"/>
+        <line num="9" count="4" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="2" type="stmt"/>
+        <line num="19" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="20" count="1" type="stmt"/>
+        <line num="23" count="1" type="stmt"/>
+        <line num="32" count="23" type="stmt"/>
+        <line num="33" count="20" type="stmt"/>
+        <line num="35" count="20" type="cond" truecount="2" falsecount="0"/>
+        <line num="36" count="18" type="stmt"/>
+        <line num="37" count="18" type="stmt"/>
+        <line num="38" count="18" type="stmt"/>
+        <line num="39" count="86" type="stmt"/>
+        <line num="47" count="18" type="stmt"/>
+        <line num="50" count="20" type="stmt"/>
+        <line num="59" count="23" type="stmt"/>
+        <line num="60" count="4" type="stmt"/>
+        <line num="62" count="4" type="cond" truecount="2" falsecount="0"/>
+        <line num="63" count="1" type="stmt"/>
+        <line num="66" count="3" type="stmt"/>
+        <line num="93" count="72" type="cond" truecount="2" falsecount="0"/>
+        <line num="95" count="3" type="stmt"/>
+        <line num="100" count="3" type="stmt"/>
+        <line num="109" count="23" type="stmt"/>
+        <line num="110" count="5" type="stmt"/>
+        <line num="112" count="5" type="cond" truecount="2" falsecount="0"/>
+        <line num="113" count="2" type="stmt"/>
+        <line num="117" count="3" type="stmt"/>
+        <line num="118" count="3" type="stmt"/>
+        <line num="120" count="3" type="stmt"/>
+        <line num="122" count="3" type="stmt"/>
+        <line num="131" count="23" type="stmt"/>
+        <line num="132" count="2" type="stmt"/>
+        <line num="134" count="2" type="stmt"/>
+        <line num="136" count="4" type="cond" truecount="2" falsecount="0"/>
+        <line num="143" count="23" type="stmt"/>
+        <line num="144" count="2" type="stmt"/>
+        <line num="145" count="2" type="stmt"/>
+        <line num="147" count="2" type="stmt"/>
+        <line num="148" count="2" type="stmt"/>
+        <line num="150" count="2" type="stmt"/>
+        <line num="151" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="152" count="2" type="stmt"/>
+        <line num="154" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="155" count="1" type="stmt"/>
+        <line num="156" count="1" type="stmt"/>
+        <line num="157" count="3" type="stmt"/>
+        <line num="166" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="167" count="1" type="stmt"/>
+        <line num="168" count="1" type="stmt"/>
+        <line num="169" count="1" type="stmt"/>
+        <line num="179" count="2" type="stmt"/>
+      </file>
+      <file name="taskController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\taskController.js">
+        <metrics statements="74" coveredstatements="61" conditionals="40" coveredconditionals="26" methods="10" coveredmethods="9"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="8" count="23" type="stmt"/>
+        <line num="9" count="1" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="1" type="stmt"/>
+        <line num="22" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="23" count="0" type="stmt"/>
+        <line num="26" count="1" type="stmt"/>
+        <line num="35" count="23" type="stmt"/>
+        <line num="36" count="8" type="stmt"/>
+        <line num="38" count="7" type="stmt"/>
+        <line num="47" count="23" type="stmt"/>
+        <line num="48" count="10" type="stmt"/>
+        <line num="50" count="10" type="cond" truecount="1" falsecount="1"/>
+        <line num="51" count="0" type="stmt"/>
+        <line num="55" count="10" type="cond" truecount="1" falsecount="1"/>
+        <line num="56" count="10" type="cond" truecount="2" falsecount="0"/>
+        <line num="57" count="10" type="stmt"/>
+        <line num="59" count="10" type="stmt"/>
+        <line num="72" count="100" type="cond" truecount="2" falsecount="0"/>
+        <line num="74" count="10" type="stmt"/>
+        <line num="80" count="10" type="cond" truecount="2" falsecount="0"/>
+        <line num="81" count="3" type="stmt"/>
+        <line num="82" count="3" type="stmt"/>
+        <line num="84" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="86" count="2" type="stmt"/>
+        <line num="87" count="2" type="stmt"/>
+        <line num="88" count="2" type="stmt"/>
+        <line num="99" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="101" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="102" count="0" type="stmt"/>
+        <line num="103" count="0" type="cond" truecount="0" falsecount="4"/>
+        <line num="104" count="0" type="stmt"/>
+        <line num="119" count="10" type="stmt"/>
+        <line num="128" count="23" type="stmt"/>
+        <line num="129" count="2" type="stmt"/>
+        <line num="131" count="2" type="cond" truecount="1" falsecount="1"/>
+        <line num="132" count="0" type="stmt"/>
+        <line num="135" count="2" type="stmt"/>
+        <line num="137" count="2" type="stmt"/>
+        <line num="146" count="23" type="stmt"/>
+        <line num="147" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="148" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="149" count="1" type="stmt"/>
+        <line num="150" count="1" type="stmt"/>
+        <line num="151" count="1" type="stmt"/>
+        <line num="152" count="1" type="stmt"/>
+        <line num="154" count="1" type="stmt"/>
+        <line num="165" count="23" type="stmt"/>
+        <line num="166" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="167" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="168" count="3" type="stmt"/>
+        <line num="169" count="3" type="stmt"/>
+        <line num="170" count="3" type="stmt"/>
+        <line num="171" count="3" type="stmt"/>
+        <line num="173" count="3" type="stmt"/>
+        <line num="184" count="23" type="stmt"/>
+        <line num="185" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="186" count="1" type="cond" truecount="2" falsecount="0"/>
+        <line num="187" count="1" type="stmt"/>
+        <line num="188" count="1" type="stmt"/>
+        <line num="189" count="1" type="stmt"/>
+        <line num="190" count="1" type="stmt"/>
+        <line num="192" count="1" type="stmt"/>
+        <line num="203" count="23" type="stmt"/>
+        <line num="204" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="205" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="206" count="0" type="stmt"/>
+        <line num="207" count="0" type="stmt"/>
+        <line num="208" count="0" type="stmt"/>
+        <line num="209" count="0" type="stmt"/>
+        <line num="211" count="0" type="stmt"/>
+      </file>
+      <file name="userController.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\controllers\userController.js">
+        <metrics statements="33" coveredstatements="27" conditionals="10" coveredconditionals="6" methods="7" coveredmethods="6"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="8" count="23" type="stmt"/>
+        <line num="9" count="3" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="0" type="stmt"/>
+        <line num="18" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="19" count="0" type="stmt"/>
+        <line num="22" count="0" type="stmt"/>
+        <line num="31" count="23" type="stmt"/>
+        <line num="32" count="2" type="stmt"/>
+        <line num="46" count="22" type="cond" truecount="2" falsecount="0"/>
+        <line num="48" count="2" type="stmt"/>
+        <line num="50" count="2" type="stmt"/>
+        <line num="59" count="23" type="stmt"/>
+        <line num="60" count="1" type="stmt"/>
+        <line num="72" count="9" type="cond" truecount="2" falsecount="0"/>
+        <line num="74" count="1" type="stmt"/>
+        <line num="79" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="80" count="0" type="stmt"/>
+        <line num="83" count="1" type="stmt"/>
+        <line num="92" count="23" type="stmt"/>
+        <line num="93" count="1" type="stmt"/>
+        <line num="95" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="96" count="0" type="stmt"/>
+        <line num="100" count="1" type="stmt"/>
+        <line num="101" count="1" type="stmt"/>
+        <line num="102" count="1" type="stmt"/>
+        <line num="103" count="1" type="stmt"/>
+        <line num="104" count="1" type="stmt"/>
+        <line num="106" count="1" type="stmt"/>
+        <line num="114" count="1" type="stmt"/>
+      </file>
+    </package>
+    <package name="middleware">
+      <metrics statements="88" coveredstatements="86" conditionals="50" coveredconditionals="46" methods="12" coveredmethods="12"/>
+      <file name="advancedResults.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\middleware\advancedResults.js">
+        <metrics statements="41" coveredstatements="39" conditionals="20" coveredconditionals="19" methods="5" coveredmethods="5"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="5" count="230" type="cond" truecount="1" falsecount="0"/>
+        <line num="9" count="46" type="stmt"/>
+        <line num="12" count="46" type="stmt"/>
+        <line num="15" count="230" type="stmt"/>
+        <line num="18" count="46" type="stmt"/>
+        <line num="21" count="46" type="stmt"/>
+        <line num="24" count="46" type="stmt"/>
+        <line num="25" count="46" type="stmt"/>
+        <line num="28" count="0" type="stmt"/>
+        <line num="32" count="46" type="stmt"/>
+        <line num="35" count="46" type="cond" truecount="5" falsecount="0"/>
+        <line num="36" count="3" type="stmt"/>
+        <line num="37" count="6" type="stmt"/>
+        <line num="43" count="46" type="stmt"/>
+        <line num="46" count="46" type="cond" truecount="2" falsecount="0"/>
+        <line num="47" count="2" type="stmt"/>
+        <line num="48" count="2" type="stmt"/>
+        <line num="52" count="46" type="cond" truecount="2" falsecount="0"/>
+        <line num="53" count="1" type="stmt"/>
+        <line num="54" count="1" type="stmt"/>
+        <line num="56" count="45" type="stmt"/>
+        <line num="60" count="46" type="cond" truecount="2" falsecount="0"/>
+        <line num="61" count="46" type="cond" truecount="2" falsecount="0"/>
+        <line num="62" count="46" type="stmt"/>
+        <line num="63" count="46" type="stmt"/>
+        <line num="64" count="46" type="stmt"/>
+        <line num="66" count="46" type="stmt"/>
+        <line num="68" count="46" type="cond" truecount="2" falsecount="0"/>
+        <line num="69" count="37" type="stmt"/>
+        <line num="73" count="46" type="stmt"/>
+        <line num="76" count="46" type="stmt"/>
+        <line num="78" count="46" type="cond" truecount="2" falsecount="0"/>
+        <line num="79" count="1" type="stmt"/>
+        <line num="85" count="46" type="cond" truecount="1" falsecount="1"/>
+        <line num="86" count="0" type="stmt"/>
+        <line num="92" count="46" type="stmt"/>
+        <line num="100" count="46" type="stmt"/>
+        <line num="103" count="23" type="stmt"/>
+      </file>
+      <file name="async.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\middleware\async.js">
+        <metrics statements="3" coveredstatements="3" conditionals="0" coveredconditionals="0" methods="2" coveredmethods="2"/>
+        <line num="1" count="2255" type="stmt"/>
+        <line num="2" count="736" type="stmt"/>
+        <line num="4" count="24" type="stmt"/>
+      </file>
+      <file name="auth.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\middleware\auth.js">
+        <metrics statements="21" coveredstatements="21" conditionals="10" coveredconditionals="10" methods="3" coveredmethods="3"/>
+        <line num="1" count="24" type="stmt"/>
+        <line num="2" count="24" type="stmt"/>
+        <line num="3" count="24" type="stmt"/>
+        <line num="4" count="24" type="stmt"/>
+        <line num="7" count="24" type="stmt"/>
+        <line num="10" count="353" type="cond" truecount="2" falsecount="0"/>
+        <line num="15" count="343" type="stmt"/>
+        <line num="22" count="353" type="cond" truecount="2" falsecount="0"/>
+        <line num="23" count="10" type="stmt"/>
+        <line num="26" count="343" type="stmt"/>
+        <line num="28" count="343" type="stmt"/>
+        <line num="30" count="338" type="stmt"/>
+        <line num="32" count="338" type="cond" truecount="2" falsecount="0"/>
+        <line num="33" count="1" type="stmt"/>
+        <line num="36" count="337" type="stmt"/>
+        <line num="38" count="5" type="stmt"/>
+        <line num="43" count="24" type="stmt"/>
+        <line num="44" count="578" type="stmt"/>
+        <line num="45" count="107" type="cond" truecount="2" falsecount="0"/>
+        <line num="46" count="18" type="stmt"/>
+        <line num="53" count="89" type="stmt"/>
+      </file>
+      <file name="error.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\middleware\error.js">
+        <metrics statements="23" coveredstatements="23" conditionals="20" coveredconditionals="17" methods="2" coveredmethods="2"/>
+        <line num="1" count="24" type="stmt"/>
+        <line num="2" count="24" type="stmt"/>
+        <line num="4" count="24" type="stmt"/>
+        <line num="5" count="93" type="stmt"/>
+        <line num="8" count="93" type="cond" truecount="1" falsecount="1"/>
+        <line num="11" count="93" type="cond" truecount="2" falsecount="0"/>
+        <line num="12" count="2" type="stmt"/>
+        <line num="13" count="2" type="stmt"/>
+        <line num="17" count="93" type="cond" truecount="2" falsecount="0"/>
+        <line num="18" count="2" type="stmt"/>
+        <line num="19" count="2" type="stmt"/>
+        <line num="23" count="93" type="cond" truecount="2" falsecount="0"/>
+        <line num="24" count="3" type="stmt"/>
+        <line num="25" count="2" type="stmt"/>
+        <line num="29" count="93" type="cond" truecount="2" falsecount="0"/>
+        <line num="30" count="1" type="stmt"/>
+        <line num="33" count="93" type="cond" truecount="2" falsecount="0"/>
+        <line num="34" count="1" type="stmt"/>
+        <line num="38" count="93" type="cond" truecount="2" falsecount="0"/>
+        <line num="39" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="40" count="1" type="stmt"/>
+        <line num="43" count="93" type="cond" truecount="2" falsecount="0"/>
+        <line num="49" count="24" type="stmt"/>
+      </file>
+    </package>
+    <package name="models">
+      <metrics statements="104" coveredstatements="102" conditionals="21" coveredconditionals="15" methods="7" coveredmethods="7"/>
+      <file name="ActivityLog.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\ActivityLog.js">
+        <metrics statements="5" coveredstatements="5" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="24" type="stmt"/>
+        <line num="3" count="24" type="stmt"/>
+        <line num="59" count="24" type="stmt"/>
+        <line num="60" count="24" type="stmt"/>
+        <line num="62" count="24" type="stmt"/>
+      </file>
+      <file name="Attendance.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\Attendance.js">
+        <metrics statements="4" coveredstatements="4" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="24" type="stmt"/>
+        <line num="3" count="24" type="stmt"/>
+        <line num="53" count="24" type="stmt"/>
+        <line num="55" count="24" type="stmt"/>
+      </file>
+      <file name="ChannelPartner.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\ChannelPartner.js">
+        <metrics statements="5" coveredstatements="5" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="24" type="stmt"/>
+        <line num="3" count="24" type="stmt"/>
+        <line num="66" count="24" type="stmt"/>
+        <line num="67" count="24" type="stmt"/>
+        <line num="69" count="24" type="stmt"/>
+      </file>
+      <file name="Counter.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\Counter.js">
+        <metrics statements="3" coveredstatements="3" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="27" type="stmt"/>
+        <line num="3" count="27" type="stmt"/>
+        <line num="15" count="27" type="stmt"/>
+      </file>
+      <file name="Group.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\Group.js">
+        <metrics statements="4" coveredstatements="4" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="24" type="stmt"/>
+        <line num="3" count="24" type="stmt"/>
+        <line num="24" count="24" type="stmt"/>
+        <line num="26" count="24" type="stmt"/>
+      </file>
+      <file name="Lead.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\Lead.js">
+        <metrics statements="8" coveredstatements="8" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="24" type="stmt"/>
+        <line num="3" count="24" type="stmt"/>
+        <line num="112" count="24" type="stmt"/>
+        <line num="113" count="24" type="stmt"/>
+        <line num="114" count="24" type="stmt"/>
+        <line num="115" count="24" type="stmt"/>
+        <line num="116" count="24" type="stmt"/>
+        <line num="118" count="24" type="stmt"/>
+      </file>
+      <file name="Notification.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\Notification.js">
+        <metrics statements="22" coveredstatements="20" conditionals="15" coveredconditionals="9" methods="2" coveredmethods="2"/>
+        <line num="1" count="25" type="stmt"/>
+        <line num="2" count="25" type="stmt"/>
+        <line num="4" count="25" type="stmt"/>
+        <line num="45" count="25" type="stmt"/>
+        <line num="46" count="25" type="stmt"/>
+        <line num="49" count="25" type="stmt"/>
+        <line num="50" count="8" type="cond" truecount="7" falsecount="0"/>
+        <line num="52" count="1" type="stmt"/>
+        <line num="54" count="1" type="stmt"/>
+        <line num="56" count="1" type="stmt"/>
+        <line num="58" count="1" type="stmt"/>
+        <line num="60" count="1" type="stmt"/>
+        <line num="62" count="1" type="stmt"/>
+        <line num="64" count="2" type="stmt"/>
+        <line num="68" count="25" type="stmt"/>
+        <line num="69" count="82" type="stmt"/>
+        <line num="71" count="82" type="cond" truecount="2" falsecount="2"/>
+        <line num="73" count="0" type="stmt"/>
+        <line num="84" count="0" type="stmt"/>
+        <line num="88" count="25" type="stmt"/>
+        <line num="91" count="25" type="stmt"/>
+        <line num="93" count="25" type="stmt"/>
+      </file>
+      <file name="Plot.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\Plot.js">
+        <metrics statements="5" coveredstatements="5" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="24" type="stmt"/>
+        <line num="3" count="24" type="stmt"/>
+        <line num="116" count="24" type="stmt"/>
+        <line num="117" count="24" type="stmt"/>
+        <line num="119" count="24" type="stmt"/>
+      </file>
+      <file name="Project.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\Project.js">
+        <metrics statements="7" coveredstatements="7" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="25" type="stmt"/>
+        <line num="3" count="25" type="stmt"/>
+        <line num="124" count="25" type="stmt"/>
+        <line num="125" count="25" type="stmt"/>
+        <line num="126" count="25" type="stmt"/>
+        <line num="129" count="25" type="stmt"/>
+        <line num="137" count="25" type="stmt"/>
+      </file>
+      <file name="Task.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\Task.js">
+        <metrics statements="7" coveredstatements="7" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="24" type="stmt"/>
+        <line num="3" count="24" type="stmt"/>
+        <line num="64" count="24" type="stmt"/>
+        <line num="65" count="24" type="stmt"/>
+        <line num="66" count="24" type="stmt"/>
+        <line num="67" count="24" type="stmt"/>
+        <line num="69" count="24" type="stmt"/>
+      </file>
+      <file name="User.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\User.js">
+        <metrics statements="31" coveredstatements="31" conditionals="6" coveredconditionals="6" methods="5" coveredmethods="5"/>
+        <line num="1" count="27" type="stmt"/>
+        <line num="2" count="27" type="stmt"/>
+        <line num="3" count="27" type="stmt"/>
+        <line num="4" count="27" type="stmt"/>
+        <line num="5" count="27" type="stmt"/>
+        <line num="7" count="27" type="stmt"/>
+        <line num="79" count="27" type="stmt"/>
+        <line num="80" count="27" type="stmt"/>
+        <line num="81" count="27" type="stmt"/>
+        <line num="84" count="27" type="stmt"/>
+        <line num="85" count="465" type="cond" truecount="2" falsecount="0"/>
+        <line num="86" count="452" type="cond" truecount="2" falsecount="0"/>
+        <line num="88" count="452" type="stmt"/>
+        <line num="89" count="452" type="stmt"/>
+        <line num="90" count="452" type="stmt"/>
+        <line num="95" count="452" type="stmt"/>
+        <line num="100" count="27" type="stmt"/>
+        <line num="101" count="465" type="cond" truecount="2" falsecount="0"/>
+        <line num="102" count="9" type="stmt"/>
+        <line num="104" count="456" type="stmt"/>
+        <line num="105" count="456" type="stmt"/>
+        <line num="109" count="27" type="stmt"/>
+        <line num="110" count="17" type="stmt"/>
+        <line num="116" count="27" type="stmt"/>
+        <line num="117" count="11" type="stmt"/>
+        <line num="121" count="27" type="stmt"/>
+        <line num="123" count="1" type="stmt"/>
+        <line num="126" count="1" type="stmt"/>
+        <line num="132" count="1" type="stmt"/>
+        <line num="134" count="1" type="stmt"/>
+        <line num="137" count="27" type="stmt"/>
+      </file>
+      <file name="WhatsAppMessage.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\models\WhatsAppMessage.js">
+        <metrics statements="3" coveredstatements="3" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="1" type="stmt"/>
+        <line num="3" count="1" type="stmt"/>
+        <line num="42" count="1" type="stmt"/>
+      </file>
+    </package>
+    <package name="routes">
+      <metrics statements="149" coveredstatements="149" conditionals="0" coveredconditionals="0" methods="1" coveredmethods="1"/>
+      <file name="activityLogRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\activityLogRoutes.js">
+        <metrics statements="13" coveredstatements="13" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="12" count="23" type="stmt"/>
+        <line num="14" count="23" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="23" type="stmt"/>
+        <line num="18" count="23" type="stmt"/>
+        <line num="21" count="23" type="stmt"/>
+        <line num="22" count="23" type="stmt"/>
+        <line num="23" count="23" type="stmt"/>
+        <line num="25" count="23" type="stmt"/>
+        <line num="30" count="23" type="stmt"/>
+        <line num="35" count="23" type="stmt"/>
+      </file>
+      <file name="attendanceRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\attendanceRoutes.js">
+        <metrics statements="12" coveredstatements="12" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="13" count="23" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="23" type="stmt"/>
+        <line num="17" count="23" type="stmt"/>
+        <line num="20" count="23" type="stmt"/>
+        <line num="21" count="23" type="stmt"/>
+        <line num="22" count="23" type="stmt"/>
+        <line num="24" count="23" type="stmt"/>
+        <line num="29" count="23" type="stmt"/>
+        <line num="35" count="23" type="stmt"/>
+      </file>
+      <file name="authRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\authRoutes.js">
+        <metrics statements="18" coveredstatements="18" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="17" count="23" type="stmt"/>
+        <line num="18" count="23" type="stmt"/>
+        <line num="25" count="23" type="stmt"/>
+        <line num="29" count="23" type="stmt"/>
+        <line num="40" count="23" type="stmt"/>
+        <line num="49" count="23" type="stmt"/>
+        <line num="50" count="23" type="stmt"/>
+        <line num="51" count="23" type="stmt"/>
+        <line num="52" count="23" type="stmt"/>
+        <line num="53" count="23" type="stmt"/>
+        <line num="54" count="23" type="stmt"/>
+        <line num="55" count="23" type="stmt"/>
+        <line num="57" count="23" type="stmt"/>
+        <line num="61" count="23" type="stmt"/>
+      </file>
+      <file name="channelPartnerRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\channelPartnerRoutes.js">
+        <metrics statements="13" coveredstatements="13" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="12" count="23" type="stmt"/>
+        <line num="14" count="23" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="23" type="stmt"/>
+        <line num="17" count="23" type="stmt"/>
+        <line num="18" count="23" type="stmt"/>
+        <line num="21" count="23" type="stmt"/>
+        <line num="22" count="23" type="stmt"/>
+        <line num="24" count="23" type="stmt"/>
+        <line num="29" count="23" type="stmt"/>
+        <line num="35" count="23" type="stmt"/>
+      </file>
+      <file name="groupRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\groupRoutes.js">
+        <metrics statements="12" coveredstatements="12" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="12" count="23" type="stmt"/>
+        <line num="14" count="23" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="23" type="stmt"/>
+        <line num="18" count="23" type="stmt"/>
+        <line num="20" count="23" type="stmt"/>
+        <line num="25" count="23" type="stmt"/>
+        <line num="31" count="23" type="stmt"/>
+        <line num="32" count="23" type="stmt"/>
+        <line num="34" count="23" type="stmt"/>
+      </file>
+      <file name="leadRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\leadRoutes.js">
+        <metrics statements="14" coveredstatements="14" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="13" count="23" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="23" type="stmt"/>
+        <line num="17" count="23" type="stmt"/>
+        <line num="18" count="23" type="stmt"/>
+        <line num="19" count="23" type="stmt"/>
+        <line num="22" count="23" type="stmt"/>
+        <line num="23" count="23" type="stmt"/>
+        <line num="24" count="23" type="stmt"/>
+        <line num="26" count="23" type="stmt"/>
+        <line num="35" count="23" type="stmt"/>
+        <line num="41" count="23" type="stmt"/>
+      </file>
+      <file name="notificationRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\notificationRoutes.js">
+        <metrics statements="13" coveredstatements="13" conditionals="0" coveredconditionals="0" methods="1" coveredmethods="1"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="13" count="23" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="23" type="stmt"/>
+        <line num="17" count="23" type="stmt"/>
+        <line num="20" count="23" type="stmt"/>
+        <line num="21" count="23" type="stmt"/>
+        <line num="22" count="23" type="stmt"/>
+        <line num="24" count="23" type="stmt"/>
+        <line num="26" count="4" type="stmt"/>
+        <line num="29" count="23" type="stmt"/>
+        <line num="35" count="23" type="stmt"/>
+      </file>
+      <file name="plotRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\plotRoutes.js">
+        <metrics statements="16" coveredstatements="16" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="17" count="23" type="stmt"/>
+        <line num="19" count="23" type="stmt"/>
+        <line num="20" count="23" type="stmt"/>
+        <line num="21" count="23" type="stmt"/>
+        <line num="24" count="23" type="stmt"/>
+        <line num="25" count="23" type="stmt"/>
+        <line num="26" count="23" type="stmt"/>
+        <line num="27" count="23" type="stmt"/>
+        <line num="28" count="23" type="stmt"/>
+        <line num="29" count="23" type="stmt"/>
+        <line num="30" count="23" type="stmt"/>
+        <line num="32" count="23" type="stmt"/>
+        <line num="37" count="23" type="stmt"/>
+        <line num="43" count="23" type="stmt"/>
+      </file>
+      <file name="projectRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\projectRoutes.js">
+        <metrics statements="13" coveredstatements="13" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="12" count="23" type="stmt"/>
+        <line num="14" count="23" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="23" type="stmt"/>
+        <line num="17" count="23" type="stmt"/>
+        <line num="21" count="23" type="stmt"/>
+        <line num="24" count="23" type="stmt"/>
+        <line num="25" count="23" type="stmt"/>
+        <line num="27" count="23" type="stmt"/>
+        <line num="32" count="23" type="stmt"/>
+        <line num="38" count="23" type="stmt"/>
+      </file>
+      <file name="taskRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\taskRoutes.js">
+        <metrics statements="13" coveredstatements="13" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="14" count="23" type="stmt"/>
+        <line num="16" count="23" type="stmt"/>
+        <line num="17" count="23" type="stmt"/>
+        <line num="18" count="23" type="stmt"/>
+        <line num="21" count="23" type="stmt"/>
+        <line num="22" count="23" type="stmt"/>
+        <line num="23" count="23" type="stmt"/>
+        <line num="24" count="23" type="stmt"/>
+        <line num="26" count="23" type="stmt"/>
+        <line num="33" count="23" type="stmt"/>
+        <line num="39" count="23" type="stmt"/>
+      </file>
+      <file name="userRoutes.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\routes\userRoutes.js">
+        <metrics statements="12" coveredstatements="12" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="10" count="23" type="stmt"/>
+        <line num="12" count="23" type="stmt"/>
+        <line num="13" count="23" type="stmt"/>
+        <line num="14" count="23" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="23" type="stmt"/>
+        <line num="18" count="23" type="stmt"/>
+        <line num="20" count="23" type="stmt"/>
+        <line num="25" count="23" type="stmt"/>
+        <line num="31" count="23" type="stmt"/>
+      </file>
+    </package>
+    <package name="tests">
+      <metrics statements="28" coveredstatements="28" conditionals="3" coveredconditionals="3" methods="5" coveredmethods="5"/>
+      <file name="helpers.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\tests\helpers.js">
+        <metrics statements="28" coveredstatements="28" conditionals="3" coveredconditionals="3" methods="5" coveredmethods="5"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="4" count="23" type="stmt"/>
+        <line num="5" count="23" type="stmt"/>
+        <line num="9" count="23" type="stmt"/>
+        <line num="10" count="23" type="stmt"/>
+        <line num="13" count="23" type="stmt"/>
+        <line num="14" count="23" type="stmt"/>
+        <line num="15" count="23" type="stmt"/>
+        <line num="16" count="23" type="stmt"/>
+        <line num="17" count="23" type="stmt"/>
+        <line num="18" count="23" type="stmt"/>
+        <line num="19" count="23" type="stmt"/>
+        <line num="20" count="23" type="stmt"/>
+        <line num="21" count="23" type="stmt"/>
+        <line num="22" count="23" type="stmt"/>
+        <line num="23" count="23" type="stmt"/>
+        <line num="25" count="23" type="stmt"/>
+        <line num="26" count="23" type="stmt"/>
+        <line num="31" count="382" type="stmt"/>
+        <line num="36" count="382" type="stmt"/>
+        <line num="45" count="382" type="stmt"/>
+        <line num="46" count="382" type="stmt"/>
+        <line num="47" count="382" type="stmt"/>
+        <line num="52" count="207" type="stmt"/>
+        <line num="57" count="35" type="stmt"/>
+        <line num="60" count="23" type="stmt"/>
+      </file>
+    </package>
+    <package name="utils">
+      <metrics statements="86" coveredstatements="49" conditionals="38" coveredconditionals="11" methods="11" coveredmethods="6"/>
+      <file name="errorResponse.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\utils\errorResponse.js">
+        <metrics statements="3" coveredstatements="3" conditionals="0" coveredconditionals="0" methods="1" coveredmethods="1"/>
+        <line num="3" count="100" type="stmt"/>
+        <line num="4" count="100" type="stmt"/>
+        <line num="8" count="26" type="stmt"/>
+      </file>
+      <file name="fcm.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\utils\fcm.js">
+        <metrics statements="55" coveredstatements="18" conditionals="28" coveredconditionals="2" methods="5" coveredmethods="0"/>
+        <line num="1" count="25" type="stmt"/>
+        <line num="2" count="25" type="stmt"/>
+        <line num="3" count="25" type="stmt"/>
+        <line num="4" count="25" type="stmt"/>
+        <line num="5" count="25" type="stmt"/>
+        <line num="6" count="25" type="stmt"/>
+        <line num="8" count="25" type="stmt"/>
+        <line num="10" count="25" type="stmt"/>
+        <line num="11" count="25" type="stmt"/>
+        <line num="14" count="25" type="stmt"/>
+        <line num="15" count="25" type="cond" truecount="1" falsecount="1"/>
+        <line num="16" count="25" type="stmt"/>
+        <line num="17" count="25" type="stmt"/>
+        <line num="20" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="21" count="0" type="stmt"/>
+        <line num="22" count="0" type="stmt"/>
+        <line num="23" count="0" type="stmt"/>
+        <line num="25" count="0" type="stmt"/>
+        <line num="29" count="25" type="cond" truecount="1" falsecount="1"/>
+        <line num="30" count="25" type="stmt"/>
+        <line num="33" count="25" type="stmt"/>
+        <line num="34" count="25" type="stmt"/>
+        <line num="36" count="0" type="stmt"/>
+        <line num="39" count="0" type="stmt"/>
+        <line num="47" count="25" type="stmt"/>
+        <line num="48" count="0" type="stmt"/>
+        <line num="49" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="50" count="0" type="stmt"/>
+        <line num="51" count="0" type="cond" truecount="0" falsecount="5"/>
+        <line num="52" count="0" type="stmt"/>
+        <line num="55" count="0" type="stmt"/>
+        <line num="58" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="59" count="0" type="stmt"/>
+        <line num="60" count="0" type="stmt"/>
+        <line num="61" count="0" type="stmt"/>
+        <line num="65" count="0" type="stmt"/>
+        <line num="66" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="67" count="0" type="stmt"/>
+        <line num="68" count="0" type="stmt"/>
+        <line num="72" count="0" type="stmt"/>
+        <line num="78" count="0" type="stmt"/>
+        <line num="79" count="0" type="stmt"/>
+        <line num="82" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="83" count="0" type="stmt"/>
+        <line num="84" count="0" type="stmt"/>
+        <line num="85" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="86" count="0" type="stmt"/>
+        <line num="87" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="92" count="0" type="stmt"/>
+        <line num="94" count="0" type="stmt"/>
+        <line num="98" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="99" count="0" type="stmt"/>
+        <line num="100" count="0" type="stmt"/>
+        <line num="101" count="0" type="stmt"/>
+        <line num="105" count="0" type="stmt"/>
+      </file>
+      <file name="logger.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\utils\logger.js">
+        <metrics statements="6" coveredstatements="6" conditionals="2" coveredconditionals="1" methods="1" coveredmethods="1"/>
+        <line num="1" count="39" type="stmt"/>
+        <line num="2" count="39" type="stmt"/>
+        <line num="5" count="39" type="stmt"/>
+        <line num="6" count="143" type="stmt"/>
+        <line num="10" count="39" type="stmt"/>
+        <line num="28" count="39" type="stmt"/>
+      </file>
+      <file name="validation.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\utils\validation.js">
+        <metrics statements="22" coveredstatements="22" conditionals="8" coveredconditionals="8" methods="4" coveredmethods="4"/>
+        <line num="8" count="1" type="stmt"/>
+        <line num="9" count="6" type="stmt"/>
+        <line num="10" count="6" type="stmt"/>
+        <line num="18" count="1" type="stmt"/>
+        <line num="20" count="5" type="stmt"/>
+        <line num="21" count="5" type="stmt"/>
+        <line num="29" count="1" type="stmt"/>
+        <line num="30" count="5" type="cond" truecount="2" falsecount="0"/>
+        <line num="31" count="1" type="stmt"/>
+        <line num="38" count="4" type="cond" truecount="2" falsecount="0"/>
+        <line num="39" count="1" type="stmt"/>
+        <line num="46" count="3" type="cond" truecount="2" falsecount="0"/>
+        <line num="47" count="1" type="stmt"/>
+        <line num="54" count="2" type="cond" truecount="2" falsecount="0"/>
+        <line num="55" count="1" type="stmt"/>
+        <line num="61" count="1" type="stmt"/>
+        <line num="72" count="1" type="stmt"/>
+        <line num="73" count="4" type="stmt"/>
+        <line num="74" count="4" type="stmt"/>
+        <line num="75" count="2" type="stmt"/>
+        <line num="77" count="2" type="stmt"/>
+        <line num="81" count="1" type="stmt"/>
+      </file>
+    </package>
+    <package name="validators">
+      <metrics statements="25" coveredstatements="25" conditionals="2" coveredconditionals="2" methods="2" coveredmethods="2"/>
+      <file name="authValidators.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\validators\authValidators.js">
+        <metrics statements="6" coveredstatements="6" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="9" count="23" type="stmt"/>
+        <line num="14" count="23" type="stmt"/>
+        <line num="18" count="23" type="stmt"/>
+        <line num="23" count="23" type="stmt"/>
+      </file>
+      <file name="channelPartnerValidators.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\validators\channelPartnerValidators.js">
+        <metrics statements="2" coveredstatements="2" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+      </file>
+      <file name="leadValidators.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\validators\leadValidators.js">
+        <metrics statements="2" coveredstatements="2" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+      </file>
+      <file name="projectValidators.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\validators\projectValidators.js">
+        <metrics statements="3" coveredstatements="3" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="9" count="23" type="stmt"/>
+      </file>
+      <file name="userValidators.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\validators\userValidators.js">
+        <metrics statements="3" coveredstatements="3" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="3" count="23" type="stmt"/>
+        <line num="10" count="23" type="stmt"/>
+      </file>
+      <file name="validate.js" path="C:\Users\sujan\Downloads\CRM-RE-changes\CRM-RE-changes\backend\validators\validate.js">
+        <metrics statements="9" coveredstatements="9" conditionals="2" coveredconditionals="2" methods="2" coveredmethods="2"/>
+        <line num="1" count="23" type="stmt"/>
+        <line num="2" count="23" type="stmt"/>
+        <line num="4" count="23" type="stmt"/>
+        <line num="5" count="83" type="stmt"/>
+        <line num="6" count="83" type="cond" truecount="2" falsecount="0"/>
+        <line num="7" count="17" type="stmt"/>
+        <line num="8" count="11" type="stmt"/>
+        <line num="10" count="72" type="stmt"/>
+        <line num="13" count="23" type="stmt"/>
+      </file>
+    </package>
+  </project>
+</coverage>
