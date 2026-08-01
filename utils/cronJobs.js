@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
+const Attendance = require('../models/Attendance');
 const logger = require('./logger');
 
 /**
@@ -67,6 +68,22 @@ function extractMMDD(dateVal) {
 }
 
 /**
+ * Check if a birthday notification for the same recipient + entity already exists
+ * within the current UTC day (avoids duplicates when cron re-runs / server restarts).
+ */
+async function birthdayNotifExists({ userId, entityId }) {
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
+  const existing = await Notification.findOne({
+    userId,
+    type: 'birthday',
+    entityId: entityId ? entityId.toString() : { $exists: false },
+    createdAt: { $gte: startOfToday },
+  });
+  return !!existing;
+}
+
+/**
  * Check and send daily follow-up reminders scheduled for today
  */
 async function checkDailyFollowUps() {
@@ -85,11 +102,12 @@ async function checkDailyFollowUps() {
     let count = 0;
     for (const lead of leads) {
       if (lead.assignedTo) {
-        // Prevent duplicate notification on the same day
+        // Prevent duplicate notification on the same day (escape name to avoid invalid/unintended regex)
+        const escapedName = lead.customerName ? String(lead.customerName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
         const existing = await Notification.findOne({
           userId: lead.assignedTo,
-          type: { $in: ['lead_status', 'Lead', 'followup', 'lead'] },
-          message: { $regex: lead.customerName },
+          type: { $in: ['lead_status', 'followup'] },
+          ...(escapedName ? { message: { $regex: escapedName } } : {}),
           createdAt: {
             $gte: new Date(new Date().setHours(0, 0, 0, 0)),
           },
@@ -137,8 +155,11 @@ async function checkTomorrowBirthdays() {
 
     for (const staff of tomorrowStaff) {
       for (const admin of admins) {
+        if (await birthdayNotifExists({ userId: admin._id, entityId: staff._id })) continue;
         await Notification.create({
           userId: admin._id,
+          entityId: staff._id.toString(),
+          entityType: 'User',
           title: 'Upcoming Staff Birthday Tomorrow 🎂',
           message: `Tomorrow (${tomorrowFormatted}) is Staff member ${staff.name}'s birthday!`,
           type: 'birthday',
@@ -153,8 +174,11 @@ async function checkTomorrowBirthdays() {
 
     for (const lead of tomorrowLeads) {
       for (const admin of admins) {
+        if (await birthdayNotifExists({ userId: admin._id, entityId: lead._id })) continue;
         await Notification.create({
           userId: admin._id,
+          entityId: lead._id.toString(),
+          entityType: 'Lead',
           title: 'Upcoming Customer Birthday Tomorrow 🎁',
           message: `Tomorrow (${tomorrowFormatted}) is customer/lead ${lead.customerName}'s birthday (Assigned to: ${lead.assignedToName || 'Staff'}).`,
           type: 'birthday',
@@ -188,8 +212,11 @@ async function checkTodayBirthdays() {
     for (const staff of todayStaff) {
       // Notify Admin
       for (const admin of admins) {
+        if (await birthdayNotifExists({ userId: admin._id, entityId: staff._id })) continue;
         await Notification.create({
           userId: admin._id,
+          entityId: staff._id.toString(),
+          entityType: 'User',
           title: `Happy Birthday ${staff.name}! 🎉`,
           message: `Today is Staff member ${staff.name}'s birthday! Wish them a wonderful day.`,
           type: 'birthday',
@@ -197,13 +224,17 @@ async function checkTodayBirthdays() {
         });
       }
       // Notify staff member themselves
-      await Notification.create({
-        userId: staff._id,
-        title: `Happy Birthday ${staff.name}! 🎂🎉`,
-        message: `Wishing you a very Happy Birthday from Samy & Co Land Promoters!`,
-        type: 'birthday',
-        isRead: false,
-      });
+      if (!(await birthdayNotifExists({ userId: staff._id, entityId: staff._id }))) {
+        await Notification.create({
+          userId: staff._id,
+          entityId: staff._id.toString(),
+          entityType: 'User',
+          title: `Happy Birthday ${staff.name}! 🎂🎉`,
+          message: `Wishing you a very Happy Birthday from Samy & Co Land Promoters!`,
+          type: 'birthday',
+          isRead: false,
+        });
+      }
     }
 
     // 2. Qualified / Customer Lead Birthdays Today -> Notify assigned staff & Admin
@@ -213,19 +244,26 @@ async function checkTodayBirthdays() {
     for (const lead of todayLeads) {
       // Notify assigned staff
       if (lead.assignedTo) {
-        await Notification.create({
-          userId: lead.assignedTo,
-          title: `Customer Birthday Today! 🎂`,
-          message: `Today is ${lead.customerName}'s birthday! Remember to wish your customer a happy birthday.`,
-          type: 'birthday',
-          link: `/staff/leads/${lead._id}`,
-          isRead: false,
-        });
+        if (!(await birthdayNotifExists({ userId: lead.assignedTo, entityId: lead._id }))) {
+          await Notification.create({
+            userId: lead.assignedTo,
+            entityId: lead._id.toString(),
+            entityType: 'Lead',
+            title: `Customer Birthday Today! 🎂`,
+            message: `Today is ${lead.customerName}'s birthday! Remember to wish your customer a happy birthday.`,
+            type: 'birthday',
+            link: `/staff/leads/${lead._id}`,
+            isRead: false,
+          });
+        }
       }
       // Notify Admin
       for (const admin of admins) {
+        if (await birthdayNotifExists({ userId: admin._id, entityId: lead._id })) continue;
         await Notification.create({
           userId: admin._id,
+          entityId: lead._id.toString(),
+          entityType: 'Lead',
           title: `Customer Birthday Today! 🎈`,
           message: `Today is customer ${lead.customerName}'s birthday (Assigned to: ${lead.assignedToName || 'Staff'}).`,
           type: 'birthday',
@@ -238,6 +276,52 @@ async function checkTodayBirthdays() {
     logger.info(`[CRON] Today birthday checks complete: ${todayStaff.length} staff, ${todayLeads.length} leads.`);
   } catch (err) {
     logger.error(`[CRON] Today birthday check failed: ${err.message}`);
+  }
+}
+
+/**
+ * Mark Absent for staff with no attendance record on the given working date.
+ * Runs after office hours so today's check-ins have already been recorded.
+ * Only non-Sunday dates are considered working days (Sunday is weekly off).
+ */
+async function markAbsentForDate(targetDate) {
+  try {
+    const d = targetDate ? new Date(targetDate) : new Date();
+    if (isNaN(d.getTime())) {
+      logger.error('[CRON] markAbsentForDate: invalid target date');
+      return;
+    }
+
+    const dateStr = formatDateYYYYMMDD(d);
+    // Sunday = weekly off, never mark absent
+    if (d.getDay() === 0) return;
+
+    const activeStaff = await User.find({ role: 'staff', isActive: true }).select('name designation');
+    if (!activeStaff.length) return;
+
+    const records = await Attendance.find({ date: dateStr }).select('staffId').lean();
+    const recordedIds = new Set(records.map(r => String(r.staffId)));
+
+    let created = 0;
+    for (const staff of activeStaff) {
+      if (recordedIds.has(String(staff._id))) continue;
+      await Attendance.create({
+        staffId: staff._id,
+        staffName: staff.name,
+        date: dateStr,
+        status: 'Absent',
+        role: staff.designation || 'Sales Executive',
+        activityType: 'Office',
+        checkIn: '-',
+        checkOut: '-',
+        duration: '-',
+      });
+      created++;
+    }
+
+    logger.info(`[CRON] Marked ${created} staff Absent for ${dateStr}.`);
+  } catch (err) {
+    logger.error(`[CRON] Absent marking failed: ${err.message}`);
   }
 }
 
@@ -260,6 +344,12 @@ function startCronJobs() {
     await checkTomorrowBirthdays();
   });
 
+  // 3. Daily 9:00 PM Cron -> Mark today's Absent for staff who never checked in
+  cron.schedule('0 21 * * *', async () => {
+    logger.info('[CRON 9:00 PM] Marking today absentees...');
+    await markAbsentForDate();
+  });
+
   // Run initial checks on startup
   setTimeout(() => {
     checkDailyFollowUps();
@@ -273,4 +363,5 @@ module.exports = {
   checkDailyFollowUps,
   checkTomorrowBirthdays,
   checkTodayBirthdays,
+  markAbsentForDate,
 };

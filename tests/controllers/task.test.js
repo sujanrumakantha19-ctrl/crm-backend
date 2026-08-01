@@ -2,6 +2,7 @@ const request = require('supertest');
 const { buildTestApp, createAdminUser, createTestUser } = require('../helpers');
 const Task = require('../../models/Task');
 const User = require('../../models/User');
+const Notification = require('../../models/Notification');
 
 const app = buildTestApp();
 
@@ -127,6 +128,72 @@ describe('Task Controller', () => {
         .set('Authorization', `Bearer ${adminToken}`);
       expect(res.status).toBe(200);
       expect(res.body.data.every(t => t.status === 'Done')).toBe(true);
+    });
+  });
+
+  describe('Staff ownership guard (issue 30)', () => {
+    it('should allow staff to update only tasks assigned to them', async () => {
+      const task = await Task.create({ title: 'Mine', assignee: staffUser._id });
+      const res = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ status: 'In Progress' });
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe('In Progress');
+    });
+
+    it('should return 403 when staff tries to update another staff member task', async () => {
+      const other = await User.create({
+        name: 'Other Staff', initials: 'OS', role: 'staff', email: `os${Date.now()}@x.com`, phone: '333', password: 'password123',
+      });
+      const task = await Task.create({ title: 'Not Mine', assignee: other._id });
+      const res = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ status: 'In Progress' });
+      expect(res.status).toBe(403);
+    });
+
+    it('should block staff from reassigning or changing project/priority of own task', async () => {
+      const other = await User.create({
+        name: 'Target', initials: 'TG', role: 'staff', email: `tg${Date.now()}@x.com`, phone: '444', password: 'password123',
+      });
+      const task = await Task.create({ title: 'Own', assignee: staffUser._id, priority: 'Medium' });
+      const res = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ priority: 'High', assignee: other._id });
+      expect(res.status).toBe(200);
+      const updated = await Task.findById(task._id);
+      expect(String(updated.assignee)).toBe(String(staffUser._id));
+      expect(updated.priority).toBe('Medium');
+    });
+  });
+
+  describe('Task comment notification type (issue 31)', () => {
+    it('should create a task_comment notification (not task_assigned) when a comment is added', async () => {
+      const task = await Task.create({ title: 'Comment Target', assignee: staffUser._id });
+      const res = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ comments: [{ id: 'c1', author: 'Admin', authorInitials: 'AU', text: 'Nice', timestamp: new Date().toISOString() }] });
+      expect(res.status).toBe(200);
+
+      const notif = await Notification.findOne({ entityId: task._id.toString(), entityType: 'Task', userId: staffUser._id });
+      expect(notif).not.toBeNull();
+      expect(notif.type).toBe('task_comment');
+    });
+  });
+
+  describe('createTask allow-list (issue 33)', () => {
+    it('should ignore injected createdAt / unexpected fields', async () => {
+      const res = await request(app)
+        .post('/api/v1/tasks')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ title: 'Clean Task', createdAt: '2020-01-01', evilField: 'x' });
+      expect(res.status).toBe(201);
+      expect(res.body.data.title).toBe('Clean Task');
+      expect(res.body.data.evilField).toBeUndefined();
     });
   });
 });

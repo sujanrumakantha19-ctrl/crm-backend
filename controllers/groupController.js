@@ -55,6 +55,21 @@ exports.updateGroup = asyncHandler(async (req, res, next) => {
 
   Object.keys(allowedFields).forEach(key => allowedFields[key] === undefined && delete allowedFields[key]);
 
+  if (allowedFields.members) {
+    const memberStrings = allowedFields.members.map(m => String(m));
+    const oldMembers = group.members.map(m => String(m));
+    const added = memberStrings.filter(m => !oldMembers.includes(m));
+    const removed = oldMembers.filter(m => !memberStrings.includes(m));
+
+    const User = require('../models/User');
+    if (added.length > 0) {
+      await User.updateMany({ _id: { $in: added } }, { groupId: group._id });
+    }
+    if (removed.length > 0) {
+      await User.updateMany({ _id: { $in: removed } }, { groupId: null });
+    }
+  }
+
   group = await Group.findByIdAndUpdate(req.params.id, allowedFields, {
     returnDocument: 'after',
     runValidators: true,
@@ -104,13 +119,17 @@ exports.addMember = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('Please provide a userId', 400));
   }
 
-  // Check if member already exists
-  if (group.members.includes(userId)) {
+  // Check if member already exists (compare as strings to avoid ObjectId vs string mismatch)
+  if (group.members.some(m => String(m) === String(userId))) {
     return next(new ErrorResponse('User is already a member of this group', 400));
   }
 
   group.members.push(userId);
   await group.save();
+
+  // Sync User.groupId so membership stays consistent (issue 66)
+  const User = require('../models/User');
+  await User.updateOne({ _id: userId }, { groupId: group._id });
 
   res.status(200).json({
     success: true,
@@ -128,7 +147,7 @@ exports.removeMember = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Group not found with id of ${req.params.id}`, 404));
   }
 
-  const memberIndex = group.members.indexOf(req.params.userId);
+  const memberIndex = group.members.findIndex(m => String(m) === String(req.params.userId));
 
   if (memberIndex === -1) {
     return next(new ErrorResponse('User is not a member of this group', 400));
@@ -136,6 +155,10 @@ exports.removeMember = asyncHandler(async (req, res, next) => {
 
   group.members.splice(memberIndex, 1);
   await group.save();
+
+  // Sync User.groupId so membership stays consistent (issue 66)
+  const User = require('../models/User');
+  await User.updateOne({ _id: req.params.userId }, { groupId: null });
 
   res.status(200).json({
     success: true,

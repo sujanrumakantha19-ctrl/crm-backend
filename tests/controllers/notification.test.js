@@ -1,11 +1,12 @@
 const request = require('supertest');
 const { buildTestApp, createAdminUser, createTestUser } = require('../helpers');
 const Notification = require('../../models/Notification');
+const User = require('../../models/User');
 
 const app = buildTestApp();
 
 describe('Notification Controller', () => {
-  let adminToken, staffToken, adminUser;
+  let adminToken, staffToken, adminUser, staffUser;
 
   beforeEach(async () => {
     const admin = await createAdminUser();
@@ -13,6 +14,7 @@ describe('Notification Controller', () => {
     adminUser = admin.user;
     const staff = await createTestUser();
     staffToken = staff.token;
+    staffUser = staff.user;
   });
 
   describe('POST /api/v1/notifications', () => {
@@ -23,6 +25,26 @@ describe('Notification Controller', () => {
         .send({ type: 'new_lead', message: 'New lead assigned' });
       expect(res.status).toBe(201);
       expect(res.body.data.type).toBe('new_lead');
+    });
+
+    it('should force notification to current user for non-admins (issue 35)', async () => {
+      const victim = await createTestUser();
+      const res = await request(app)
+        .post('/api/v1/notifications')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ type: 'new_lead', message: 'Staff notif', userId: victim.user._id.toString() });
+      expect(res.status).toBe(201);
+      expect(res.body.data.userId.toString()).toBe(staffUser._id.toString());
+    });
+
+    it('should preserve title and link fields (issue 39)', async () => {
+      const res = await request(app)
+        .post('/api/v1/notifications')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ type: 'new_lead', message: 'With title', title: 'Birthday Reminder', link: '/leads' });
+      expect(res.status).toBe(201);
+      expect(res.body.data.title).toBe('Birthday Reminder');
+      expect(res.body.data.link).toBe('/leads');
     });
   });
 
@@ -64,6 +86,16 @@ describe('Notification Controller', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.isRead).toBe(true);
     });
+
+    it('should forbid staff from marking another user\'s notification as read (issue 36)', async () => {
+      const notif = await Notification.create({
+        type: 'task_assigned', message: 'Task', userId: adminUser._id, isRead: false,
+      });
+      const res = await request(app)
+        .put(`/api/v1/notifications/${notif._id}/read`)
+        .set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(403);
+    });
   });
 
   describe('PUT /api/v1/notifications/read/all', () => {
@@ -92,6 +124,17 @@ describe('Notification Controller', () => {
         .set('Authorization', `Bearer ${adminToken}`);
       expect(res.status).toBe(200);
       expect(await Notification.findById(notif._id)).toBeNull();
+    });
+
+    it('should forbid staff from deleting another user\'s notification (issue 36)', async () => {
+      const notif = await Notification.create({
+        type: 'attendance', message: 'Not yours', userId: adminUser._id,
+      });
+      const res = await request(app)
+        .delete(`/api/v1/notifications/${notif._id}`)
+        .set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(403);
+      expect(await Notification.findById(notif._id)).not.toBeNull();
     });
   });
 });

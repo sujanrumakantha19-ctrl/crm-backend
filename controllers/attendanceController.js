@@ -2,14 +2,26 @@ const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
 const Attendance = require('../models/Attendance');
 
+// Staff users may only access their own attendance records
+function staffUid(req) {
+  if (req.user && req.user.role === 'staff') {
+    return String(req.user.id || req.user._id || '');
+  }
+  return null;
+}
+
 // @desc    Get all attendance records
 // @route   GET /api/v1/attendance
 // @access  Public
 exports.getAttendances = asyncHandler(async (req, res, next) => {
+  const uid = staffUid(req);
   if (req.query.month) {
     const monthPrefix = req.query.month;
     delete req.query.month;
     const query = { date: { $regex: `^${monthPrefix}` } };
+
+    if (uid) query.staffId = uid;
+    if (req.query.staffId && !uid) query.staffId = req.query.staffId;
 
     if (req.query.status && req.query.status !== 'All') {
       const statusVal = req.query.status;
@@ -57,45 +69,26 @@ exports.getAttendance = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Attendance not found with id of ${req.params.id}`, 404));
   }
 
+  const uid = staffUid(req);
+  if (uid && String(attendance.staffId) !== uid) {
+    return next(new ErrorResponse('You are not allowed to view this attendance record', 403));
+  }
+
   res.status(200).json({
     success: true,
     data: attendance,
   });
 });
 
-// @desc    Create attendance record (with 10-minute session window)
+// @desc    Create attendance record
 // @route   POST /api/v1/attendance
 // @access  Private
+// Each check-in always creates a new record - the old 10-minute "resume"
+// merge silently wiped checkOut/duration and distorted the day's history (issue 29).
 exports.createAttendance = asyncHandler(async (req, res, next) => {
-  const staffId = req.body.staffId;
-  const today = req.body.date || new Date().toISOString().slice(0, 10);
-  const now = new Date();
+  const uid = staffUid(req);
+  if (uid) req.body.staffId = uid;
 
-  // Check if a record exists for this staff member today created less than 10 minutes ago
-  const tenMinsAgo = new Date(now.getTime() - 10 * 60 * 1000);
-  const recent = await Attendance.findOne({
-    staffId,
-    date: today,
-    createdAt: { $gte: tenMinsAgo },
-  }).sort({ createdAt: -1 });
-
-  if (recent) {
-    // Within 10-minute window -> Reopen/update existing session instead of creating duplicate
-    recent.activityType = req.body.activityType || recent.activityType;
-    if (req.body.projectId !== undefined) recent.projectId = req.body.projectId;
-    if (req.body.projectName !== undefined) recent.projectName = req.body.projectName;
-    recent.checkOut = undefined;
-    recent.duration = undefined;
-    await recent.save();
-
-    return res.status(200).json({
-      success: true,
-      data: recent,
-      message: 'Session resumed and activity updated within 10 minutes',
-    });
-  }
-
-  // After 10 minutes or first check-in -> Create new attendance record
   const attendance = await Attendance.create(req.body);
 
   res.status(201).json({
@@ -112,6 +105,15 @@ exports.updateAttendance = asyncHandler(async (req, res, next) => {
 
   if (!attendance) {
     return next(new ErrorResponse(`Attendance not found with id of ${req.params.id}`, 404));
+  }
+
+  const uid = staffUid(req);
+  if (uid) {
+    if (String(attendance.staffId) !== uid) {
+      return next(new ErrorResponse('You are not allowed to update this attendance record', 403));
+    }
+    // Staff may only touch their own check-in/out details, never reassign
+    delete req.body.staffId;
   }
 
   const allowedFields = {
@@ -163,6 +165,11 @@ exports.deleteAttendance = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Attendance not found with id of ${req.params.id}`, 404));
   }
 
+  const uid = staffUid(req);
+  if (uid && String(attendance.staffId) !== uid) {
+    return next(new ErrorResponse('You are not allowed to delete this attendance record', 403));
+  }
+
   await attendance.deleteOne();
 
   res.status(200).json({
@@ -179,7 +186,8 @@ exports.getAttendanceByStaff = asyncHandler(async (req, res, next) => {
   const limit = parseInt(req.query.limit, 10) || 12;
   const skip = (page - 1) * limit;
 
-  const query = { staffId: req.params.staffId };
+  const uid = staffUid(req);
+  const query = { staffId: uid || req.params.staffId };
 
   if (req.query.month) {
     query.date = { $regex: `^${req.query.month}` };
@@ -233,6 +241,8 @@ exports.getAttendanceByDate = asyncHandler(async (req, res, next) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
   const skip = (page - 1) * limit;
   const query = { date: req.params.date };
+  const uid = staffUid(req);
+  if (uid) query.staffId = uid;
   const total = await Attendance.countDocuments(query);
   const attendance = await Attendance.find(query).skip(skip).limit(limit).sort('-createdAt');
 
@@ -248,11 +258,14 @@ exports.getAttendanceByDate = asyncHandler(async (req, res, next) => {
 // @route   GET /api/v1/attendance/today
 // @access  Public
 exports.getTodayAttendance = asyncHandler(async (req, res, next) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const page = parseInt(req.query.page, 10) || 1;
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
   const skip = (page - 1) * limit;
   const query = { date: today };
+  const uid = staffUid(req);
+  if (uid) query.staffId = uid;
   const total = await Attendance.countDocuments(query);
   const attendance = await Attendance.find(query).skip(skip).limit(limit).sort('-createdAt');
 

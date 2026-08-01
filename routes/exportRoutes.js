@@ -7,6 +7,7 @@ const {
   exportAttendance,
   exportTasks,
   exportProjects,
+  exportProjectDetail,
   exportCustomers,
   exportUsers,
   exportChannelPartners,
@@ -20,6 +21,7 @@ router.get('/follow-ups', exportFollowUps);
 router.get('/attendance', exportAttendance);
 router.get('/tasks', exportTasks);
 router.get('/projects', exportProjects);
+router.get('/project-detail', exportProjectDetail);
 router.get('/customers', exportCustomers);
 router.get('/users', exportUsers);
 router.get('/channel-partners', exportChannelPartners);

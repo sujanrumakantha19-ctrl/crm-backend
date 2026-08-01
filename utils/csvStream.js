@@ -56,4 +56,25 @@ function streamCSV(req, res, cursor, columns, filename) {
   });
 }
 
-module.exports = { streamCSV };
+function streamArrayCSV(req, res, docs, columns, filename) {
+  const dateStr = new Date().toISOString().split('T')[0];
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}_${dateStr}.csv"`);
+  res.write('\uFEFF');
+
+  const headerRow = columns.map(c => escapeCSV(c.label)).join(',') + '\n';
+  res.write(headerRow);
+
+  for (const doc of docs) {
+    const row = columns.map(c => {
+      let val = resolveNested(doc, c.key);
+      if (c.format) val = c.format(val, doc);
+      return escapeCSV(val);
+    }).join(',');
+    res.write(row + '\n');
+  }
+
+  if (!res.writableEnded) res.end();
+}
+
+module.exports = { streamCSV, streamArrayCSV };

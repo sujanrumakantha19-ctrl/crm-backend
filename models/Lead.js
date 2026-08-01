@@ -47,6 +47,10 @@ const LeadSchema = new mongoose.Schema(
       type: String,
       enum: ['Channel Partner', 'Staff', 'Direct', 'Walk-in', 'Phone Call', 'Instagram', 'Facebook', 'Website', 'Leads Portal', 'Own Client', 'Office Referral', 'Client Referral', 'Admin', 'Admin Added'],
     },
+    sourceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

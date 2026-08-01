@@ -3,6 +3,7 @@ const { buildTestApp, createAdminUser, createTestUser } = require('../helpers');
 const Notification = require('../../models/Notification');
 const User = require('../../models/User');
 const Lead = require('../../models/Lead');
+const { checkTodayBirthdays } = require('../../utils/cronJobs');
 
 const app = buildTestApp();
 
@@ -101,7 +102,7 @@ describe('Notification Controller Coverage', () => {
   });
 
   describe('Birthday notification creation', () => {
-    it('should create birthday notifications for staff with today birthday', async () => {
+    it('should NOT create birthday notifications on GET (issue 38 — cron handles it)', async () => {
       const admin = await createAdminUser();
       const today = new Date();
       const dob = `${today.getFullYear() - 30}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -111,13 +112,37 @@ describe('Notification Controller Coverage', () => {
         email: `bday${Date.now()}@x.com`, phone: '123', password: 'pass123', dob,
       });
 
-      // Trigger birthday check via GET notifications
-      const res = await request(app)
+      await Lead.create({
+        customerName: 'Birthday Customer', phone: '999',
+        email: `bcust${Date.now()}@x.com`, status: 'Customer', dob,
+      });
+
+      // Fetching notifications must not trigger a birthday scan
+      await request(app)
         .get('/api/v1/notifications')
         .set('Authorization', `Bearer ${admin.token}`);
-      expect(res.status).toBe(200);
+      await request(app)
+        .get('/api/v1/notifications/unread')
+        .set('Authorization', `Bearer ${admin.token}`);
 
-      // Check if birthday notification was created
+      const birthdayNotifs = await Notification.find({
+        userId: admin.user._id, type: 'birthday',
+      });
+      expect(birthdayNotifs.length).toBe(0);
+    });
+
+    it('cron checkTodayBirthdays should create notifications for staff with today birthday', async () => {
+      const admin = await createAdminUser();
+      const today = new Date();
+      const dob = `${today.getFullYear() - 30}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+      await User.create({
+        name: 'Birthday Staff', initials: 'BS', role: 'staff',
+        email: `bday${Date.now()}@x.com`, phone: '123', password: 'pass123', dob,
+      });
+
+      await checkTodayBirthdays();
+
       const birthdayNotifs = await Notification.find({
         userId: admin.user._id, type: 'birthday', entityType: 'User',
       });
@@ -125,7 +150,7 @@ describe('Notification Controller Coverage', () => {
       expect(birthdayNotifs[0].message).toContain('Birthday');
     });
 
-    it('should create birthday notifications for customers with today birthday', async () => {
+    it('cron checkTodayBirthdays should create notifications for customers with today birthday', async () => {
       const admin = await createAdminUser();
       const today = new Date();
       const dob = `${today.getFullYear() - 30}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -135,17 +160,15 @@ describe('Notification Controller Coverage', () => {
         email: `bcust${Date.now()}@x.com`, status: 'Customer', dob,
       });
 
-      await request(app)
-        .get('/api/v1/notifications/unread')
-        .set('Authorization', `Bearer ${admin.token}`);
+      await checkTodayBirthdays();
 
       const birthdayNotifs = await Notification.find({
-        userId: admin.user._id, type: 'birthday', entityType: 'Lead',
+        userId: admin.user._id, type: 'birthday',
       });
       expect(birthdayNotifs.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('should not duplicate birthday notifications', async () => {
+    it('cron checkTodayBirthdays should not duplicate notifications on re-run', async () => {
       const admin = await createAdminUser();
       const today = new Date();
       const dob = `${today.getFullYear() - 30}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -155,14 +178,14 @@ describe('Notification Controller Coverage', () => {
         email: `dupbday${Date.now()}@x.com`, phone: '123', password: 'pass123', dob,
       });
 
-      // Trigger twice
-      await request(app).get('/api/v1/notifications').set('Authorization', `Bearer ${admin.token}`);
-      await request(app).get('/api/v1/notifications').set('Authorization', `Bearer ${admin.token}`);
+      // Run the cron twice
+      await checkTodayBirthdays();
+      await checkTodayBirthdays();
 
       const birthdayNotifs = await Notification.find({
-        userId: admin.user._id, type: 'birthday', entityType: 'User',
+        userId: admin.user._id, type: 'birthday', message: /Dup Staff/,
       });
-      // Should not create duplicates
+      // Each admin gets exactly one birthday notification per staff member
       expect(birthdayNotifs.length).toBe(1);
     });
   });

@@ -19,7 +19,7 @@ const { protect, authorize } = require('../middleware/auth');
 const advancedResults = require('../middleware/advancedResults');
 const Lead = require('../models/Lead');
 const validate = require('../validators/validate');
-const { createLeadValidator } = require('../validators/leadValidators');
+const { createLeadValidator, updateLeadValidator } = require('../validators/leadValidators');
 
 // Specific routes BEFORE parameterized routes
 router.route('/counts').get(protect, getLeadCounts);
@@ -54,7 +54,7 @@ router
 router
   .route('/:id')
   .get(protect, getLead)
-  .put(protect, updateLead)
+  .put(protect, updateLeadValidator, validate, updateLead)
   .delete(protect, deleteLead);
 
 module.exports = router;

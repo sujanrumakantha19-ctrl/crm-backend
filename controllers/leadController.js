@@ -6,6 +6,21 @@ const User = require('../models/User');
 const Plot = require('../models/Plot');
 const ActivityLog = require('../models/ActivityLog');
 
+// Follow-up outcome classification. Negative outcomes are matched on full words
+// (word boundaries), so partial/unrelated matches (e.g. "Wrong project but
+// interested") no longer get mislabelled as negative.
+const NEGATIVE_OUTCOME_RE = '\\bnot interested\\b|\\bdnd\\b|\\bdo not call\\b|\\bwrong number\\b|\\bdropped\\b|\\binvalid\\b|\\bno answer\\b|\\bnegative\\b';
+const POSITIVE_OUTCOME_RE = '\\binterested\\b|\\bcall back\\b|\\bcallback\\b';
+const isNegativeOutcome = {
+  'followUps.outcome': { $regex: NEGATIVE_OUTCOME_RE, $options: 'i' },
+};
+const isPositiveOutcome = {
+  $and: [
+    { 'followUps.outcome': { $regex: POSITIVE_OUTCOME_RE, $options: 'i' } },
+    { 'followUps.outcome': { $not: { $regex: NEGATIVE_OUTCOME_RE, $options: 'i' } } },
+  ],
+};
+
 // @desc    Get all leads
 // @route   GET /api/v1/leads
 // @access  Public
@@ -74,24 +89,31 @@ exports.checkPhoneExists = asyncHandler(async (req, res, next) => {
   }
 
   const last10 = digits.slice(-10);
-  const lead = await Lead.findOne({
-    $or: [
-      { phone: phone },
-      { phone: { $regex: last10 } }
-    ]
-  }).select('customerName phone status assignedToName');
+  // Match any stored phone that ENDS with the queried last-10 digits. Anchoring
+  // the regex to the end avoids false positives where the digits merely appear
+  // elsewhere in the number.
+  const candidates = await Lead.find({
+    phone: { $regex: new RegExp(`${last10}$`) }
+  }).select('customerName phone status assignedToName assignedToDisplayId displayId');
 
-  if (lead) {
+  if (candidates.length > 0) {
+    // Prefer the exact phone match, otherwise the first candidate found.
+    const lead =
+      candidates.find(c => c.phone.replace(/\D/g, '').slice(-10) === last10) ||
+      candidates[0];
     return res.status(200).json({
       success: true,
       exists: true,
       lead: {
         id: String(lead._id),
+        displayId: lead.displayId || String(lead._id),
         customerName: lead.customerName,
         phone: lead.phone,
         status: lead.status,
         assignedToName: lead.assignedToName || 'Unassigned',
-      }
+        assignedToDisplayId: lead.assignedToDisplayId || null,
+      },
+      duplicatesCount: candidates.length,
     });
   }
 
@@ -165,6 +187,7 @@ exports.createLead = asyncHandler(async (req, res, next) => {
     notes: req.body.notes,
     source: req.body.source,
     sourceType: req.body.sourceType,
+    sourceId: req.body.sourceId || (req.body.sourceType === 'Channel Partner' && req.user?.role === 'partner' ? req.user._id : undefined),
     assignedTo: req.body.assignedTo,
     assignedToName: req.body.assignedToName,
     status: req.body.status,
@@ -183,6 +206,24 @@ exports.createLead = asyncHandler(async (req, res, next) => {
   };
 
   const lead = await Lead.create(allowedFields);
+
+  try {
+    await ActivityLog.create({
+      actorId: req.user ? req.user.id : null,
+      actorName: req.user ? req.user.name : 'System',
+      actorRole: req.user ? req.user.role : 'system',
+      actorInitials: req.user ? req.user.initials : 'SYS',
+      actionType: 'Created',
+      action: `Created lead "${allowedFields.customerName}"`,
+      entityType: 'Lead',
+      entityId: lead._id,
+      entityName: allowedFields.customerName,
+      timestamp: new Date().toISOString(),
+      ipAddress: req.ip || '',
+    });
+  } catch (logErr) {
+    console.error('Failed to create activity log:', logErr.message);
+  }
 
   if (req.body.assignedTo) {
     try {
@@ -223,6 +264,7 @@ exports.updateLead = asyncHandler(async (req, res, next) => {
   }
 
   const previousStatus = lead.status;
+  const previousPlotId = lead.plotId ? String(lead.plotId) : null;
 
   const allowedFields = {
     customerName: req.body.customerName,
@@ -238,6 +280,7 @@ exports.updateLead = asyncHandler(async (req, res, next) => {
     notes: req.body.notes,
     source: req.body.source,
     sourceType: req.body.sourceType,
+    sourceId: req.body.sourceId || (req.body.sourceType === 'Channel Partner' && req.user?.role === 'partner' ? req.user._id : undefined),
     assignedTo: req.body.assignedTo,
     assignedToName: req.body.assignedToName,
     status: req.body.status,
@@ -277,16 +320,49 @@ exports.updateLead = asyncHandler(async (req, res, next) => {
 
   await lead.save();
 
-  // If lead status changed to Customer & plotId is present, auto-sync plot status to Booked
-  if (allowedFields.status === 'Customer' && previousStatus !== 'Customer' && lead.plotId) {
+  // ── Auto-sync plot status based on the lead's Customer state and its plotId ──
+  const currentPlotId = lead.plotId ? String(lead.plotId) : null;
+  const isCustomer = lead.status === 'Customer';
+
+  const releasePlot = async (plotId) => {
+    if (!plotId) return;
+    const p = await Plot.findById(plotId);
+    if (p && p.status !== 'Registered' && p.status !== 'Available') {
+      p.status = 'Available';
+      p.bookedBy = undefined;
+      p.pendingApproval = undefined;
+      p.registrationDate = undefined;
+      await p.save();
+    }
+  };
+
+  // plotId changed or cleared: free the previously linked plot.
+  if (previousPlotId && previousPlotId !== currentPlotId) {
     try {
-      await Plot.findByIdAndUpdate(lead.plotId, { status: 'Booked' });
+      await releasePlot(previousPlotId);
+    } catch (e) {
+      console.error('Error auto-syncing old plot status to Available:', e);
+    }
+  }
+
+  // Lead is Customer with a plot: ensure the (possibly newly assigned) plot is Booked.
+  if (isCustomer && currentPlotId) {
+    try {
+      const p = await Plot.findById(currentPlotId);
+      if (p && ['Available', 'Canceled'].includes(p.status)) {
+        p.status = 'Booked';
+        p.bookedBy = p.bookedBy || { name: lead.customerName, phone: lead.phone, type: 'customer' };
+        await p.save();
+      }
     } catch (e) {
       console.error('Error auto-syncing plot status to Booked:', e);
     }
-  } else if (previousStatus === 'Customer' && allowedFields.status && allowedFields.status !== 'Customer' && lead.plotId) {
+  }
+
+  // Lead moved out of Customer: free the linked plot.
+  if (!isCustomer && previousStatus === 'Customer' && currentPlotId) {
     try {
-      await Plot.findByIdAndUpdate(lead.plotId, { status: 'Available' });
+      await releasePlot(currentPlotId);
     } catch (e) {
       console.error('Error auto-syncing plot status to Available:', e);
     }
@@ -295,12 +371,12 @@ exports.updateLead = asyncHandler(async (req, res, next) => {
   if (allowedFields.status && allowedFields.status !== previousStatus) {
     try {
       await ActivityLog.create({
-        user: req.user ? req.user.id : null,
-        userName: req.user ? req.user.name : 'System',
-        userRole: req.user ? req.user.role : 'system',
-        userInitials: req.user ? req.user.initials : 'SYS',
-        action: 'Status Change',
-        details: `Status changed from ${previousStatus} to ${allowedFields.status}`,
+        actorId: req.user ? req.user.id : null,
+        actorName: req.user ? req.user.name : 'System',
+        actorRole: req.user ? req.user.role : 'system',
+        actorInitials: req.user ? req.user.initials : 'SYS',
+        actionType: 'Status Change',
+        action: `Status changed from ${previousStatus} to ${allowedFields.status}`,
         entityType: 'Lead',
         entityId: lead._id,
         entityName: lead.customerName,
@@ -347,12 +423,12 @@ exports.deleteLead = asyncHandler(async (req, res, next) => {
 
   try {
     await ActivityLog.create({
-      user: req.user ? req.user.id : null,
-      userName: req.user ? req.user.name : 'System',
-      userRole: req.user ? req.user.role : 'system',
-      userInitials: req.user ? req.user.initials : 'SYS',
-      action: 'Delete',
-      details: `Deleted lead ${deletedName}`,
+      actorId: req.user ? req.user.id : null,
+      actorName: req.user ? req.user.name : 'System',
+      actorRole: req.user ? req.user.role : 'system',
+      actorInitials: req.user ? req.user.initials : 'SYS',
+      actionType: 'Deleted',
+      action: `Deleted lead ${deletedName}`,
       entityType: 'Lead',
       entityId: req.params.id,
       entityName: deletedName,
@@ -545,17 +621,9 @@ exports.getFollowUps = asyncHandler(async (req, res) => {
 
   let outcomeMatch = null;
   if (outcome === 'positive') {
-    outcomeMatch = {
-      'followUps.outcome': {
-        $not: { $regex: 'not interested|dnd|wrong|dropped|invalid|no answer|negative', $options: 'i' }
-      }
-    };
+    outcomeMatch = isPositiveOutcome;
   } else if (outcome === 'negative') {
-    outcomeMatch = {
-      'followUps.outcome': {
-        $regex: 'not interested|dnd|wrong|dropped|invalid|no answer|negative', $options: 'i'
-      }
-    };
+    outcomeMatch = isNegativeOutcome;
   } else if (outcome && outcome !== 'all') {
     const escapedOpt = outcome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     outcomeMatch = {
@@ -635,21 +703,13 @@ exports.getFollowUps = asyncHandler(async (req, res) => {
         ],
         statsPositive: [
           {
-            $match: {
-              'followUps.outcome': {
-                $not: { $regex: 'not interested|dnd|wrong|dropped|invalid|no answer|negative', $options: 'i' }
-              }
-            }
+            $match: isPositiveOutcome,
           },
           { $count: 'count' }
         ],
         statsNegative: [
           {
-            $match: {
-              'followUps.outcome': {
-                $regex: 'not interested|dnd|wrong|dropped|invalid|no answer|negative', $options: 'i'
-              }
-            }
+            $match: isNegativeOutcome,
           },
           { $count: 'count' }
         ]

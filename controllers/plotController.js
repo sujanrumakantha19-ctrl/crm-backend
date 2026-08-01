@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
 const Plot = require('../models/Plot');
@@ -6,7 +7,6 @@ const User = require('../models/User');
 const Project = require('../models/Project');
 const Notification = require('../models/Notification');
 const ActivityLog = require('../models/ActivityLog');
-const { sendPushToUser } = require('../utils/fcm');
 
 // ─── Helper: create activity log entry ─────────────────────────────────
 const logActivity = async ({ actor, actionType, action, entityType, entityId, entityName, ipAddress }) => {
@@ -66,6 +66,7 @@ const toSqFeet = (value, unit) => {
   if (u === 'sqyards' || u === 'sqyard' || u === 'yards') return v * 9;
   if (u === 'acres' || u === 'acre') return v * 43560;
   if (u === 'cents' || u === 'cent') return v * 435.6;
+  if (u === 'sqmeters' || u === 'sqmeter' || u === 'sqm' || u === 'meters' || u === 'sqmetre' || u === 'sqmtrs') return v * 10.763910417;
   return v;
 };
 
@@ -167,7 +168,6 @@ exports.updatePlot = asyncHandler(async (req, res, next) => {
     price: req.body.price,
     timeline: req.body.timeline,
     bookedBy: req.body.bookedBy,
-    pendingApproval: req.body.pendingApproval,
     expectedRegistrationDate: req.body.expectedRegistrationDate,
     registrationDate: req.body.registrationDate,
   };
@@ -193,6 +193,31 @@ exports.bookPlot = asyncHandler(async (req, res, next) => {
   const paymentMethod = req.body.paymentMethod || 'CASH';
   const paymentStatus = req.body.paymentStatus || 'Not Paid';
 
+  const today = new Date().toISOString().split('T')[0];
+  const timelineEvent = isStaffBooking
+    ? {
+        id: `book-req-${Date.now()}`,
+        type: 'reserved',
+        label: 'Booking Requested',
+        actor: req.user.name || 'Staff',
+        actorRole: 'Staff',
+        actorType: 'staff',
+        date: today,
+        details: `Booking requested by ${req.user.name} (${paymentMethod})`,
+        color: 'amber',
+      }
+    : {
+        id: `book-${Date.now()}`,
+        type: 'new_booking',
+        label: 'Plot Booked',
+        actor: req.user.name || 'Admin',
+        actorRole: 'Admin',
+        actorType: 'admin',
+        date: today,
+        details: `Plot booked for ${req.body.customerName || 'customer'} (${paymentMethod})`,
+        color: 'green',
+      };
+
   const update = isStaffBooking
     ? {
         status: 'Pending',
@@ -200,10 +225,13 @@ exports.bookPlot = asyncHandler(async (req, res, next) => {
           leadId: req.body.leadId,
           customerName: req.body.customerName,
           phone: req.body.phone,
-          requestedBy: req.user.name,
-          requestedAt: new Date().toISOString().split('T')[0],
+          requestedBy: String(req.user._id || req.user.id || ''),
+          requestedAt: today,
           paymentStatus,
           paymentMethod,
+          bank: req.body.bank || '',
+          bankFollowerName: req.body.bankFollowerName || '',
+          bankFollowerPhone: req.body.bankFollowerPhone || '',
           notes: req.body.notes || '',
         },
         expectedRegistrationDate: req.body.expectedRegistrationDate || '',
@@ -234,24 +262,74 @@ exports.bookPlot = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('Plot not found or already booked', 400));
   }
 
-  // ─── Update the Lead with booking info ──────────────────────────────────
-  if (req.body.leadId) {
-    try {
-      const leadUpdate = {
-        plotId: plot._id,
-        paymentStatus,
-        paymentMethod,
-      };
-      if (!isStaffBooking) {
-        leadUpdate.status = 'Customer';
-      }
-      if (req.body.bank) leadUpdate.bank = req.body.bank;
-      if (req.body.bankFollowerName) leadUpdate.bankFollowerName = req.body.bankFollowerName;
-      if (req.body.bankFollowerPhone) leadUpdate.bankFollowerPhone = req.body.bankFollowerPhone;
+  // Prepend booking timeline event, preserving prior history
+  plot.timeline = [timelineEvent, ...(plot.timeline || [])];
+  await plot.save();
 
-      const lead = await Lead.findByIdAndUpdate(req.body.leadId, leadUpdate, { returnDocument: 'after' });
+  // ─── Update the Lead with booking info ──────────────────────────────────
+  let targetLeadId = req.body.leadId;
+  if (!targetLeadId && req.body.phone) {
+    try {
+      const leadByPhone = await Lead.findOne({ phone: req.body.phone });
+      if (leadByPhone) targetLeadId = leadByPhone._id;
+    } catch (leadPhoneErr) {
+      console.error('Failed to find lead by phone on booking:', leadPhoneErr.message);
+    }
+  }
+
+  if (targetLeadId) {
+    try {
+      let lead = null;
+      if (mongoose.Types.ObjectId.isValid(targetLeadId)) {
+        lead = await Lead.findById(targetLeadId);
+      }
+      if (!lead && req.body.phone) {
+        lead = await Lead.findOne({ phone: req.body.phone });
+      }
 
       if (lead) {
+        // Release any previously held plot (different from this one) to avoid double-booking.
+        // Registered plots are left untouched as a customer may hold multiple registered assets.
+        const prevPlotId = lead.plotId;
+        if (prevPlotId && String(prevPlotId) !== String(plot._id)) {
+          const prevPlot = await Plot.findById(prevPlotId);
+          if (prevPlot && ['Booked', 'Pending'].includes(prevPlot.status)) {
+            prevPlot.status = 'Available';
+            prevPlot.bookedBy = undefined;
+            prevPlot.pendingApproval = undefined;
+            prevPlot.registrationDate = undefined;
+            prevPlot.timeline = [
+              {
+                id: `release-${Date.now()}`,
+                type: 'booking_canceled',
+                label: 'Released',
+                actor: req.user.name || 'Admin',
+                actorRole: req.user.role || 'admin',
+                actorType: req.user.role || 'admin',
+                date: today,
+                details: `Released because customer booked Plot #${plot.plotNumber}`,
+                color: 'red',
+              },
+              ...(prevPlot.timeline || []),
+            ];
+            await prevPlot.save();
+          }
+        }
+
+        const leadUpdate = {
+          plotId: plot._id,
+          paymentStatus,
+          paymentMethod,
+        };
+        if (!isStaffBooking) {
+          leadUpdate.status = 'Customer';
+        }
+        if (req.body.bank) leadUpdate.bank = req.body.bank;
+        if (req.body.bankFollowerName) leadUpdate.bankFollowerName = req.body.bankFollowerName;
+        if (req.body.bankFollowerPhone) leadUpdate.bankFollowerPhone = req.body.bankFollowerPhone;
+
+        await Lead.findByIdAndUpdate(lead._id, leadUpdate, { returnDocument: 'after' });
+
         await logActivity({
           actor: req.user,
           actionType: 'Status Change',
@@ -276,7 +354,7 @@ exports.bookPlot = asyncHandler(async (req, res, next) => {
       const projectName = project ? project.name : 'Project';
       const admins = await User.find({ role: 'admin' });
       for (const admin of admins) {
-        const notif = await Notification.create({
+        await Notification.create({
           type: 'booking',
           userId: admin._id,
           entityId: `${plot.projectId}:${plot._id}`,
@@ -286,12 +364,6 @@ exports.bookPlot = asyncHandler(async (req, res, next) => {
           isToday: true,
           isRead: false
         });
-        // Send FCM push to admin's phone
-        sendPushToUser(admin._id, {
-          title: '📋 New Booking Request',
-          body: `Plot #${plot.plotNumber} in ${projectName} by ${req.user.name}`,
-          data: { notificationId: notif._id.toString(), type: 'booking', entityType: 'Project', entityId: `${plot.projectId}:${plot._id}` },
-        }).catch(e => console.error('FCM push error (booking):', e.message));
       }
     } catch (notifErr) {
       console.error('Failed to create booking notification:', notifErr);
@@ -336,6 +408,16 @@ exports.approveBooking = asyncHandler(async (req, res, next) => {
     };
     plot.timeline = [cancelTimelineEvent, ...(plot.timeline || [])];
     await plot.save();
+
+    await logActivity({
+      actor: req.user,
+      actionType: 'Status Change',
+      action: `Cancelled booking of Plot #${plot.plotNumber}`,
+      entityType: 'Plot',
+      entityId: plot._id,
+      entityName: `Plot #${plot.plotNumber}`,
+      ipAddress: req.ip,
+    });
 
     // Revert associated Lead if any
     try {
@@ -421,8 +503,8 @@ exports.approveBooking = asyncHandler(async (req, res, next) => {
 
   // Notify the staff member who made the booking request
   try {
-    const requestedByUserId = plot.pendingApproval?.requestedBy || approval?.requestedBy;
-    if (requestedByUserId) {
+    const requestedByUserId = approval?.requestedBy;
+    if (requestedByUserId && mongoose.Types.ObjectId.isValid(requestedByUserId)) {
       const staffNotif = await Notification.create({
         type: 'booking',
         userId: requestedByUserId,
@@ -433,11 +515,6 @@ exports.approveBooking = asyncHandler(async (req, res, next) => {
         isToday: true,
         isRead: false,
       });
-      sendPushToUser(requestedByUserId, {
-        title: '✅ Booking Approved!',
-        body: `Plot #${plot.plotNumber} booking has been approved`,
-        data: { notificationId: staffNotif._id.toString(), type: 'booking', entityType: 'Project', entityId: `${plot.projectId}:${plot._id}` },
-      }).catch(e => console.error('FCM push error (approve->staff):', e.message));
     }
   } catch (notifErr) {
     console.error('Failed to notify staff on approval:', notifErr.message);
@@ -476,11 +553,22 @@ exports.rejectBooking = asyncHandler(async (req, res, next) => {
     plot.timeline = [rejTimelineEvent, ...(plot.timeline || [])];
     await plot.save();
 
+    await logActivity({
+      actor: req.user,
+      actionType: 'Status Change',
+      action: `Rejected cancellation for Plot #${plot.plotNumber} (booking retained)`,
+      entityType: 'Plot',
+      entityId: plot._id,
+      entityName: `Plot #${plot.plotNumber}`,
+      ipAddress: req.ip,
+    });
+
     return res.status(200).json({ success: true, data: plot });
   }
 
   const targetLeadId = plot.pendingApproval?.leadId;
   const customerPhone = plot.pendingApproval?.phone;
+  const requestedByUserId = plot.pendingApproval?.requestedBy;
 
   plot.status = 'Available';
   plot.pendingApproval = undefined;
@@ -537,8 +625,7 @@ exports.rejectBooking = asyncHandler(async (req, res, next) => {
 
   // Notify the staff member who made the booking request
   try {
-    const requestedByUserId = plot.pendingApproval?.requestedBy;
-    if (requestedByUserId) {
+    if (requestedByUserId && mongoose.Types.ObjectId.isValid(requestedByUserId)) {
       const staffNotif = await Notification.create({
         type: 'booking',
         userId: requestedByUserId,
@@ -549,11 +636,6 @@ exports.rejectBooking = asyncHandler(async (req, res, next) => {
         isToday: true,
         isRead: false,
       });
-      sendPushToUser(requestedByUserId, {
-        title: '❌ Booking Rejected',
-        body: `Plot #${plot.plotNumber} booking request was rejected`,
-        data: { notificationId: staffNotif._id.toString(), type: 'booking', entityType: 'Project', entityId: `${plot.projectId}:${plot._id}` },
-      }).catch(e => console.error('FCM push error (reject->staff):', e.message));
     }
   } catch (notifErr) {
     console.error('Failed to notify staff on rejection:', notifErr.message);
@@ -577,15 +659,27 @@ exports.registerPlot = asyncHandler(async (req, res, next) => {
   if (req.body.paymentStatus) {
     plot.bookedBy = { ...(plot.bookedBy || {}), paymentStatus: req.body.paymentStatus };
   }
+  const regTimelineEvent = {
+    id: `reg-${Date.now()}`,
+    type: 'booking_confirmed',
+    label: 'Plot Registered',
+    actor: req.user.name || 'Admin',
+    actorRole: 'Admin',
+    actorType: 'admin',
+    date: registrationDate,
+    details: `Plot registered on ${registrationDate}`,
+    color: 'blue',
+  };
+  plot.timeline = [regTimelineEvent, ...(plot.timeline || [])];
   await plot.save();
 
   // ─── Update the associated Lead ─────────────────────────────────────────
   try {
     const lead = await Lead.findOne({ plotId: plot._id });
     if (lead) {
-      const leadUpdate = { paymentStatus: req.body.paymentStatus || 'Fully Paid' };
-      if (req.body.registrationDate) {
-        leadUpdate.followUps = [
+      const leadUpdate = {
+        paymentStatus: req.body.paymentStatus || 'Fully Paid',
+        followUps: [
           ...(lead.followUps || []),
           {
             id: `reg-${Date.now()}`,
@@ -594,8 +688,8 @@ exports.registerPlot = asyncHandler(async (req, res, next) => {
             outcome: 'Registered',
             nextAction: '',
           },
-        ];
-      }
+        ],
+      };
       await Lead.findByIdAndUpdate(lead._id, leadUpdate);
 
       await logActivity({
@@ -623,8 +717,8 @@ exports.cancelBooking = asyncHandler(async (req, res, next) => {
 
   if (!plot) return next(new ErrorResponse('Plot not found', 404));
 
-  if (plot.status !== 'Booked' && plot.status !== 'Pending') {
-    return next(new ErrorResponse('Only Booked or Pending plots can be canceled', 400));
+  if (plot.status !== 'Booked') {
+    return next(new ErrorResponse('Only Booked plots can be canceled. Pending plots must be rejected by Admin instead.', 400));
   }
 
   const isStaffCancel = req.user.role === 'staff';
@@ -637,7 +731,7 @@ exports.cancelBooking = asyncHandler(async (req, res, next) => {
       leadId: plot.pendingApproval?.leadId,
       customerName: plot.bookedBy?.name || plot.pendingApproval?.customerName,
       phone: plot.bookedBy?.phone || plot.pendingApproval?.phone,
-      requestedBy: req.user.name,
+      requestedBy: String(req.user._id || req.user.id || ''),
       requestedAt: new Date().toISOString().split('T')[0],
       notes: 'Cancellation requested by staff',
     };
@@ -661,7 +755,7 @@ exports.cancelBooking = asyncHandler(async (req, res, next) => {
       const projectName = project ? project.name : 'Project';
       const admins = await User.find({ role: 'admin' });
       for (const admin of admins) {
-        const notif = await Notification.create({
+        await Notification.create({
           type: 'booking',
           userId: admin._id,
           entityId: `${plot.projectId}:${plot._id}`,
@@ -671,16 +765,20 @@ exports.cancelBooking = asyncHandler(async (req, res, next) => {
           isToday: true,
           isRead: false
         });
-        // Send FCM push to admin's phone
-        sendPushToUser(admin._id, {
-          title: '❌ Cancellation Request',
-          body: `Plot #${plot.plotNumber} in ${projectName} by ${req.user.name}`,
-          data: { notificationId: notif._id.toString(), type: 'booking', entityType: 'Project', entityId: `${plot.projectId}:${plot._id}` },
-        }).catch(e => console.error('FCM push error (cancellation):', e.message));
       }
     } catch (notifErr) {
       console.error('Failed to create cancellation notification:', notifErr);
     }
+
+    await logActivity({
+      actor: req.user,
+      actionType: 'Status Change',
+      action: `Requested cancellation of Plot #${plot.plotNumber}`,
+      entityType: 'Plot',
+      entityId: plot._id,
+      entityName: `Plot #${plot.plotNumber}`,
+      ipAddress: req.ip,
+    });
 
     return res.status(200).json({ success: true, data: plot });
   }
@@ -763,6 +861,19 @@ exports.deletePlot = asyncHandler(async (req, res, next) => {
   if (!plot) {
     return next(new ErrorResponse(`Plot not found with id of ${req.params.id}`, 404));
   }
+
+  // Cascade cleanup: unlink any leads pointing at this plot
+  await Lead.updateMany({ plotId: plot._id }, { $set: { plotId: null } });
+
+  await logActivity({
+    actor: req.user,
+    actionType: 'Deleted',
+    action: `Deleted Plot #${plot.plotNumber}`,
+    entityType: 'Plot',
+    entityId: plot._id,
+    entityName: `Plot #${plot.plotNumber}`,
+    ipAddress: req.ip,
+  });
 
   await plot.deleteOne();
 

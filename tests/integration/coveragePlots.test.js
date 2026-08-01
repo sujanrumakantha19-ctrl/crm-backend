@@ -176,8 +176,12 @@ describe('Plot Controller Coverage', () => {
         .get(`/api/v1/plots/${plot._id}/pending-approval`)
         .set('Authorization', `Bearer ${admin.token}`);
       expect(res.status).toBe(200);
-      // pendingApproval returns null or empty object when not set
-      expect(!res.body.data || Object.keys(res.body.data).length === 0).toBe(true);
+      // pendingApproval returns null, empty, or only the schema default (requestType: 'booking')
+      expect(
+        !res.body.data ||
+        Object.keys(res.body.data).length === 0 ||
+        (Object.keys(res.body.data).length === 1 && res.body.data.requestType === 'booking')
+      ).toBe(true);
     });
 
     it('should return 404 for non-existent plot', async () => {

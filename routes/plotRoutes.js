@@ -29,8 +29,8 @@ router.route('/pending-approvals').get(protect, authorize('admin'), getPendingAp
 router.route('/status/:status').get(protect, getPlotsByStatus);
 router.route('/project/:projectId').get(protect, getPlotsByProject);
 router.route('/:id/pending-approval').get(protect, getPlotPendingApproval);
-router.route('/:id/book').put(protect, bookPlot);
-router.route('/:id/cancel').put(protect, authorize('admin'), cancelBooking);
+router.route('/:id/book').put(protect, authorize('admin', 'staff'), bookPlot);
+router.route('/:id/cancel').put(protect, authorize('admin', 'staff'), cancelBooking);
 router.route('/:id/approve').put(protect, authorize('admin'), approveBooking);
 router.route('/:id/reject').put(protect, authorize('admin'), rejectBooking);
 router.route('/:id/register').put(protect, authorize('admin'), registerPlot);

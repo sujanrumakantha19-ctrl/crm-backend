@@ -2,15 +2,10 @@ const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
 const Project = require('../models/Project');
 
-const { syncAllCounters } = require('../utils/counterSync');
-
 // @desc    Get all projects
 // @route   GET /api/v1/projects
 // @access  Public
 exports.getProjects = asyncHandler(async (req, res, next) => {
-  // Ensure all existing projects & records in DB have unique displayIds assigned
-  await syncAllCounters();
-
   res.status(200).json(res.advancedResults);
 });
 
@@ -132,6 +127,27 @@ exports.updateProject = asyncHandler(async (req, res, next) => {
     returnDocument: 'after',
     runValidators: true,
   });
+
+  // Re-sync missing plots when totalPlots is increased via edit
+  if (project.totalPlots > 0) {
+    const Plot = require('../models/Plot');
+    const existingPlotsCount = await Plot.countDocuments({ projectId: project._id });
+    if (existingPlotsCount < project.totalPlots) {
+      const plotsToCreate = [];
+      for (let i = existingPlotsCount + 1; i <= project.totalPlots; i++) {
+        plotsToCreate.push({
+          projectId: project._id,
+          plotNumber: String(i),
+          status: 'Available',
+          size: project.plotSize || 200,
+          sizeUnit: project.plotSizeUnit || 'Sq Yards',
+        });
+      }
+      if (plotsToCreate.length > 0) {
+        await Plot.insertMany(plotsToCreate);
+      }
+    }
+  }
 
   res.status(200).json({
     success: true,

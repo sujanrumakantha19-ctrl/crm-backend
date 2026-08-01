@@ -14,7 +14,13 @@ function verifyToken(token) {
 
 async function loadUser(decoded) {
   if (!decoded || !decoded.id) return null;
-  return User.findOne({ _id: decoded.id, isActive: true });
+  const user = await User.findOne({ _id: decoded.id, isActive: true });
+  if (!user) return null;
+  // Reject tokens issued before the latest password change/reset (tokenVersion bump).
+  if (decoded.tokenVersion !== undefined && decoded.tokenVersion !== user.tokenVersion) {
+    return null;
+  }
+  return user;
 }
 
 // Protect routes

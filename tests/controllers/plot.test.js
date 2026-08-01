@@ -155,16 +155,16 @@ describe('Plot Controller', () => {
   describe('PUT /api/v1/plots/:id/reject', () => {
     it('should reject a pending booking and restore to Available', async () => {
       const Lead = require('../../models/Lead');
+      const plot = await Plot.create({
+        projectId, plotNumber: '30', status: 'Pending',
+        pendingApproval: { leadId: 'l', customerName: 'C', phone: '1', requestedBy: 'S', requestedAt: '2024-01-01' },
+      });
       const lead = await Lead.create({
         customerName: 'Rejected Customer',
         phone: '1234567890',
         email: 'rejected@test.com',
         status: 'Customer',
-        plotId: new (require('mongoose').Types.ObjectId)(),
-      });
-      const plot = await Plot.create({
-        projectId, plotNumber: '30', status: 'Pending',
-        pendingApproval: { leadId: lead._id.toString(), customerName: 'C', phone: '1', requestedBy: 'S', requestedAt: '2024-01-01' },
+        plotId: plot._id,
       });
 
       const res = await request(app)
@@ -175,9 +175,9 @@ describe('Plot Controller', () => {
       expect(res.body.data.status).toBe('Available');
       expect(res.body.data.pendingApproval).toBeUndefined();
 
-      // Verify lead was reverted
+      // Verify lead retains its status (Customer is not reverted) and is unlinked from the plot
       const updatedLead = await Lead.findById(lead._id);
-      expect(updatedLead.status).toBe('Qualified');
+      expect(updatedLead.status).toBe('Customer');
       expect(updatedLead.plotId).toBeNull();
     });
   });

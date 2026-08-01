@@ -1,6 +1,7 @@
 const request = require('supertest');
 const { buildTestApp, createAdminUser, createTestUser } = require('../helpers');
 const User = require('../../models/User');
+const Lead = require('../../models/Lead');
 const crypto = require('crypto');
 
 const app = buildTestApp();
@@ -118,6 +119,31 @@ describe('Auth Controller Coverage', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({ avatarBg: 'bg-red-500' });
       expect(res.status).toBe(200);
+    });
+
+    it('should cascade partner name rename to their submitted leads', async () => {
+      const partner = await createTestUser({
+        role: 'partner',
+        name: 'Old Partner Name',
+        initials: 'OP',
+        email: `cascade${Date.now()}@x.com`,
+      });
+      await Lead.create([
+        { customerName: 'Lead A', phone: '111', email: 'la@x.com', source: 'Old Partner Name', sourceType: 'Channel Partner' },
+        { customerName: 'Lead B', phone: '222', email: 'lb@x.com', source: 'Old Partner Name', sourceType: 'Channel Partner' },
+        { customerName: 'Lead C', phone: '333', email: 'lc@x.com', source: 'Other Partner', sourceType: 'Channel Partner' },
+      ]);
+
+      const res = await request(app)
+        .put('/api/v1/auth/update-profile')
+        .set('Authorization', `Bearer ${partner.token}`)
+        .send({ name: 'New Partner Name' });
+      expect(res.status).toBe(200);
+
+      const renamed = await Lead.countDocuments({ source: 'New Partner Name', sourceType: 'Channel Partner' });
+      expect(renamed).toBe(2);
+      const untouched = await Lead.countDocuments({ source: 'Other Partner' });
+      expect(untouched).toBe(1);
     });
   });
 

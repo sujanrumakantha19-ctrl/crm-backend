@@ -1,6 +1,7 @@
 const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
 const User = require('../models/User');
+const Lead = require('../models/Lead');
 const crypto = require('crypto');
 
 // @desc    Register user
@@ -71,6 +72,10 @@ exports.login = asyncHandler(async (req, res, next) => {
 
   if (!user) {
     return next(new ErrorResponse('Invalid credentials', 401));
+  }
+
+  if (!user.isActive) {
+    return next(new ErrorResponse('Your account has been deactivated. Please contact the administrator.', 401));
   }
 
   const isMatch = await user.matchPassword(password);
@@ -199,6 +204,8 @@ exports.resetPassword = asyncHandler(async (req, res, next) => {
   user.password = newPassword;
   user.resetPasswordToken = undefined;
   user.resetPasswordExpire = undefined;
+  // Invalidate all previously issued JWTs (issued with an older tokenVersion).
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
   await user.save();
 
   // Send response
@@ -240,6 +247,20 @@ exports.updateProfile = asyncHandler(async (req, res, next) => {
     runValidators: true,
   });
 
+  // Cascade renames: if the user's name changed, update the "source" stamp on their
+  // submitted leads (and any partner-report grouping) so existing leads remain reachable.
+  if (name && name !== req.user.name) {
+    try {
+      const oldName = req.user.name;
+      await Lead.updateMany(
+        { source: oldName, sourceType: 'Channel Partner' },
+        { $set: { source: name } }
+      );
+    } catch (e) {
+      console.error('Failed to cascade partner rename to leads:', e.message);
+    }
+  }
+
   res.status(200).json({ success: true, data: user });
 });
 
@@ -261,6 +282,7 @@ exports.changePassword = asyncHandler(async (req, res, next) => {
   }
 
   user.password = newPassword;
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
   await user.save();
 
   const token = user.getSignedJwtToken();

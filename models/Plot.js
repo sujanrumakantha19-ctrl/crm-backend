@@ -115,6 +115,15 @@ const PlotSchema = new mongoose.Schema(
         type: String,
         enum: ['CASH', 'LOAN'],
       },
+      bank: {
+        type: String,
+      },
+      bankFollowerName: {
+        type: String,
+      },
+      bankFollowerPhone: {
+        type: String,
+      },
       notes: {
         type: String,
       },

@@ -5,12 +5,18 @@ const NotificationSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ['birthday', 'lead_status', 'new_lead', 'task_assigned', 'attendance', 'booking', 'followup', 'system', 'lead', 'System', 'Lead'],
+      enum: ['birthday', 'lead_status', 'new_lead', 'task_assigned', 'task_comment', 'attendance', 'booking', 'followup', 'system', 'lead'],
       required: [true, 'Please add notification type'],
     },
     message: {
       type: String,
       required: [true, 'Please add a message'],
+    },
+    title: {
+      type: String,
+    },
+    link: {
+      type: String,
     },
     timeAgo: {
       type: String,
@@ -57,6 +63,8 @@ const getTitleForType = (type) => {
       return '🆕 New Lead Assigned';
     case 'task_assigned':
       return '📝 New Task Assigned';
+    case 'task_comment':
+      return '💬 Task Comment';
     case 'attendance':
       return '⏰ Attendance Update';
     case 'booking':

@@ -1,7 +1,14 @@
 const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
 const Task = require('../models/Task');
-const { sendPushToUser } = require('../utils/fcm');
+
+// Staff users may only access tasks assigned to them
+function staffUid(req) {
+  if (req.user && req.user.role === 'staff') {
+    return String(req.user.id || req.user._id || '');
+  }
+  return null;
+}
 
 // @desc    Get all tasks (with backend project, date, assignee & search filtering)
 // @route   GET /api/v1/tasks
@@ -110,6 +117,11 @@ exports.getTask = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Task not found with id of ${req.params.id}`, 404));
   }
 
+  const uid = staffUid(req);
+  if (uid && String(task.assignee) !== uid) {
+    return next(new ErrorResponse('You are not allowed to view this task', 403));
+  }
+
   res.status(200).json({
     success: true,
     data: task,
@@ -120,16 +132,29 @@ exports.getTask = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/tasks
 // @access  Private
 exports.createTask = asyncHandler(async (req, res, next) => {
-  const task = await Task.create(req.body);
+  const { title, description, status, priority, assignee, assigneeInitials, dueDate, dueTime, project, comments } = req.body;
 
-  // Notify assigned staff member via FCM push
+  const task = await Task.create({
+    title,
+    description,
+    status,
+    priority,
+    assignee,
+    assigneeInitials,
+    dueDate,
+    dueTime,
+    project,
+    comments,
+  });
+
+  // Notify assigned staff member (the Notification post-save hook sends FCM, issue 37)
   if (req.body.assignee) {
     try {
       const Notification = require('../models/Notification');
       const User = require('../models/User');
       const assigneeUser = await User.findById(req.body.assignee);
       if (assigneeUser && assigneeUser.role === 'staff') {
-        const notif = await Notification.create({
+        await Notification.create({
           type: 'task_assigned',
           userId: assigneeUser._id,
           entityId: task._id.toString(),
@@ -139,11 +164,6 @@ exports.createTask = asyncHandler(async (req, res, next) => {
           isToday: true,
           isRead: false,
         });
-        sendPushToUser(assigneeUser._id, {
-          title: '📋 New Task Assigned',
-          body: `"${task.title}" has been assigned to you`,
-          data: { notificationId: notif._id.toString(), type: 'task_assigned', entityType: 'Task', entityId: task._id.toString() },
-        }).catch(e => console.error('FCM push error (task assign):', e.message));
       }
     } catch (notifErr) {
       console.error('Failed to notify staff on task creation:', notifErr.message);
@@ -164,6 +184,20 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
 
   if (!task) {
     return next(new ErrorResponse(`Task not found with id of ${req.params.id}`, 404));
+  }
+
+  // Staff may only update tasks assigned to them (issue 30). Admins can update any task.
+  if (req.user && req.user.role === 'staff') {
+    const uid = String(req.user.id || (req.user._id || ''));
+    const assigneeId = task.assignee ? String(task.assignee) : '';
+    if (!assigneeId || assigneeId !== uid) {
+      return next(new ErrorResponse('You are not allowed to update this task', 403));
+    }
+    // Staff cannot reassign a task or change its project/priority
+    delete req.body.assignee;
+    delete req.body.assigneeInitials;
+    delete req.body.project;
+    delete req.body.priority;
   }
 
   // Check if comments are being updated (a new comment is added)
@@ -200,8 +234,8 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
       // Notify all admins
       const admins = await User.find({ role: 'admin' });
       for (const admin of admins) {
-        const notif = await Notification.create({
-          type: 'task_assigned',
+        await Notification.create({
+          type: 'task_comment',
           userId: admin._id,
           entityId: task._id.toString(),
           entityType: 'Task',
@@ -210,19 +244,14 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
           isToday: true,
           isRead: false,
         });
-        sendPushToUser(admin._id, {
-          title: '💬 Task Comment',
-          body: `${req.user.name} commented on "${task.title}"`,
-          data: { notificationId: notif._id.toString(), type: 'task_assigned', entityType: 'Task', entityId: task._id.toString() },
-        }).catch(e => console.error('FCM push error (comment->admin):', e.message));
       }
     } else if (req.user.role === 'admin') {
       // Notify the task's assignee if it's a staff member
       if (task.assignee) {
         const assigneeUser = await User.findById(task.assignee);
         if (assigneeUser && assigneeUser.role === 'staff') {
-          const notif = await Notification.create({
-            type: 'task_assigned',
+          await Notification.create({
+            type: 'task_comment',
             userId: assigneeUser._id,
             entityId: task._id.toString(),
             entityType: 'Task',
@@ -231,11 +260,6 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
             isToday: true,
             isRead: false,
           });
-          sendPushToUser(assigneeUser._id, {
-            title: '💬 Task Comment',
-            body: `Admin commented on "${task.title}"`,
-            data: { notificationId: notif._id.toString(), type: 'task_assigned', entityType: 'Task', entityId: task._id.toString() },
-          }).catch(e => console.error('FCM push error (comment->staff):', e.message));
         }
       }
     }
@@ -273,6 +297,8 @@ exports.getTasksByProject = asyncHandler(async (req, res, next) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
   const skip = (page - 1) * limit;
   const query = { project: req.params.projectId };
+  const uid = staffUid(req);
+  if (uid) query.assignee = uid;
   const total = await Task.countDocuments(query);
   const tasks = await Task.find(query).skip(skip).limit(limit).sort('-createdAt');
 
@@ -291,7 +317,8 @@ exports.getTasksByAssignee = asyncHandler(async (req, res, next) => {
   const page = parseInt(req.query.page, 10) || 1;
   const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
   const skip = (page - 1) * limit;
-  const query = { assignee: req.params.assigneeId };
+  const uid = staffUid(req);
+  const query = { assignee: uid || req.params.assigneeId };
   const total = await Task.countDocuments(query);
   const tasks = await Task.find(query).skip(skip).limit(limit).sort('-createdAt');
 
@@ -311,6 +338,8 @@ exports.getTasksByStatus = asyncHandler(async (req, res, next) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
   const skip = (page - 1) * limit;
   const query = { status: req.params.status };
+  const uid = staffUid(req);
+  if (uid) query.assignee = uid;
   const total = await Task.countDocuments(query);
   const tasks = await Task.find(query).skip(skip).limit(limit).sort('-createdAt');
 
@@ -330,6 +359,8 @@ exports.getTasksByPriority = asyncHandler(async (req, res, next) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
   const skip = (page - 1) * limit;
   const query = { priority: req.params.priority };
+  const uid = staffUid(req);
+  if (uid) query.assignee = uid;
   const total = await Task.countDocuments(query);
   const tasks = await Task.find(query).skip(skip).limit(limit).sort('-createdAt');
 

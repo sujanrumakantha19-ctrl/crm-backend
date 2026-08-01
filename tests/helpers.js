@@ -21,6 +21,8 @@ function buildTestApp() {
   app.use('/api/v1/notifications', require('../routes/notificationRoutes'));
   app.use('/api/v1/groups', require('../routes/groupRoutes'));
   app.use('/api/v1/activity-logs', require('../routes/activityLogRoutes'));
+  app.use('/api/v1/reports', require('../routes/reportRoutes'));
+  app.use('/api/v1/export', require('../routes/exportRoutes'));
 
   app.use(errorHandler);
   return app;

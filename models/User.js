@@ -68,6 +68,10 @@ const UserSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
     password: {
       type: String,
       required: [true, 'Please add a password'],
@@ -136,7 +140,7 @@ UserSchema.pre('save', async function () {
 
 // Sign JWT and return
 UserSchema.methods.getSignedJwtToken = function () {
-  return jwt.sign({ id: this._id }, process.env.JWT_SECRET, {
+  return jwt.sign({ id: this._id, tokenVersion: this.tokenVersion }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN,
   });
 };

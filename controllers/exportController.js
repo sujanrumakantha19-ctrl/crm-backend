@@ -2,11 +2,21 @@ const asyncHandler = require('../middleware/async');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
 const Project = require('../models/Project');
+const Plot = require('../models/Plot');
 const Task = require('../models/Task');
 const Attendance = require('../models/Attendance');
 const ChannelPartner = require('../models/ChannelPartner');
-const { streamCSV } = require('../utils/csvStream');
+const { streamCSV, streamArrayCSV } = require('../utils/csvStream');
 const configs = require('../utils/exportConfigs');
+const {
+  getDateFilter,
+  buildProjectsReportRows,
+  buildStaffReportRows,
+  buildAttendanceReportRows,
+  buildLeadsTrendRows,
+  buildLeadContributionRows,
+  buildChannelPartnerPerformanceRows,
+} = require('./reportController');
 
 exports.exportLeads = asyncHandler(async (req, res) => {
   const filter = {};
@@ -21,6 +31,8 @@ exports.exportLeads = asyncHandler(async (req, res) => {
 
   const query = Lead.find(filter)
     .populate('assignedTo', 'name displayId')
+    .populate('projectId', 'name displayId')
+    .populate('plotId', 'plotNumber status')
     .lean()
     .cursor();
 
@@ -29,7 +41,6 @@ exports.exportLeads = asyncHandler(async (req, res) => {
 
 exports.exportFollowUps = asyncHandler(async (req, res) => {
   const { staffId } = req.query;
-  const nameField = staffId ? 'staffName' : 'staffDisplayId';
 
   const pipeline = [
     { $unwind: '$followUps' },
@@ -37,8 +48,8 @@ exports.exportFollowUps = asyncHandler(async (req, res) => {
     {
       $group: {
         _id: '$_id',
-        customerName: { $first: '$customerName' },
         displayId: { $first: '$displayId' },
+        customerName: { $first: '$customerName' },
         phone: { $first: '$phone' },
         city: { $first: '$city' },
         status: { $first: '$status' },
@@ -47,6 +58,7 @@ exports.exportFollowUps = asyncHandler(async (req, res) => {
         followUps: { $first: '$followUps' },
       },
     },
+    { $project: { _id: 0, displayId: 1, customerName: 1, phone: 1, city: 1, status: 1, assignedToName: 1, staffDisplayId: 1, followUps: 1 } },
   ];
 
   if (staffId) {
@@ -57,37 +69,23 @@ exports.exportFollowUps = asyncHandler(async (req, res) => {
     pipeline.unshift({ $match: { assignedTo: id } });
   }
 
-  const docs = await Lead.aggregate(pipeline).allowDiskUse(true);
+  const cursor = Lead.aggregate(pipeline).allowDiskUse(true).cursor();
   const cfg = staffId ? configs.followUpsStaff : configs.followUps;
   const columns = staffId
     ? configs.followUpsStaff.columns
     : configs.followUps.columns;
 
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  const dateStr = new Date().toISOString().split('T')[0];
-  res.setHeader('Content-Disposition', `attachment; filename="${cfg.filename}_${dateStr}.csv"`);
-  res.write('\uFEFF');
-  res.write(columns.map(c => `"${c.label.replace(/"/g, '""')}"`).join(',') + '\n');
-
-  for (const doc of docs) {
-    const row = columns.map(c => {
-      let val = c.key.split('.').reduce((o, k) => (o != null ? o[k] : undefined), doc);
-      if (c.format) val = c.format(val, doc);
-      if (val == null) val = '';
-      return `"${String(val).replace(/"/g, '""')}"`;
-    }).join(',');
-    res.write(row + '\n');
-  }
-  res.end();
+  streamCSV(req, res, cursor, columns, cfg.filename);
 });
 
 exports.exportAttendance = asyncHandler(async (req, res) => {
-  const { date, employeeId, tab } = req.query;
+  const { date, employeeId, month, tab } = req.query;
   const filter = {};
   if (date) filter.date = { $regex: `^${date}` };
+  if (month) filter.date = { $regex: `^${month}` };
   if (employeeId) filter.staffId = employeeId;
 
-  let query = Attendance.find(filter).lean();
+  const query = Attendance.find(filter).lean();
 
   const isModal = tab === 'details';
   const cfg = isModal ? configs.attendanceModal : configs.attendanceMain;
@@ -101,7 +99,8 @@ exports.exportTasks = asyncHandler(async (req, res) => {
   if (req.query.assignedTo) filter.assignee = req.query.assignedTo;
 
   const cursor = Task.find(filter)
-    .populate('assignee', 'name')
+    .populate('assignee', 'name displayId')
+    .populate('project', 'name displayId')
     .lean()
     .cursor();
 
@@ -109,15 +108,99 @@ exports.exportTasks = asyncHandler(async (req, res) => {
 });
 
 exports.exportProjects = asyncHandler(async (req, res) => {
-  const cursor = Project.find().lean().cursor();
+  const cursor = Project.aggregate([
+    {
+      $lookup: {
+        from: 'plots',
+        localField: '_id',
+        foreignField: 'projectId',
+        as: 'plots',
+      },
+    },
+    {
+      $addFields: {
+        availablePlots: {
+          $size: {
+            $filter: {
+              input: '$plots',
+              as: 'p',
+              cond: { $eq: ['$$p.status', 'Available'] },
+            },
+          },
+        },
+      },
+    },
+    { $project: { plots: 0 } },
+  ]).cursor();
+
   streamCSV(req, res, cursor, configs.projects.columns, configs.projects.filename);
+});
+
+exports.exportProjectDetail = asyncHandler(async (req, res) => {
+  const { id } = req.query;
+  if (!id) {
+    res.status(400).json({ success: false, error: 'Project ID is required' });
+    return;
+  }
+
+  const project = await Project.findById(id).lean();
+  if (!project) {
+    res.status(404).json({ success: false, error: 'Project not found' });
+    return;
+  }
+
+  const plots = await Plot.find({ projectId: id }).sort({ plotNumber: 1 }).lean();
+
+  const plotIds = plots.map(p => p._id);
+  const leads = await Lead.find({
+    $or: [{ projectId: id }, { plotId: { $in: plotIds } }],
+  }).lean();
+
+  const leadById = new Map();
+  const leadByPhone = new Map();
+  for (const l of leads) {
+    leadById.set(String(l._id), l);
+    if (l.phone) leadByPhone.set(String(l.phone), l);
+  }
+
+  const docs = plots.map(plot => {
+    const leadIdCandidate = plot.bookedBy?.leadId || plot.pendingApproval?.leadId;
+    let lead = leadIdCandidate ? leadById.get(String(leadIdCandidate)) : undefined;
+    if (!lead && plot.bookedBy?.phone) {
+      lead = leadByPhone.get(String(plot.bookedBy.phone));
+    }
+
+    let latestFollowUp;
+    if (lead && Array.isArray(lead.followUps) && lead.followUps.length > 0) {
+      const sorted = [...lead.followUps].sort((a, b) => {
+        const da = a.date ? new Date(a.date).getTime() : 0;
+        const db = b.date ? new Date(b.date).getTime() : 0;
+        return db - da;
+      });
+      const last = sorted[0];
+      latestFollowUp = {
+        date: last.date || '',
+        outcome: last.outcome || '',
+        notes: last.notes || '',
+      };
+    }
+
+    return { project, plot, lead: lead || null, latestFollowUp };
+  });
+
+  streamArrayCSV(req, res, docs, configs.projectDetail.columns, configs.projectDetail.filename);
 });
 
 exports.exportCustomers = asyncHandler(async (req, res) => {
   const filter = { status: 'Customer' };
   if (req.query.search) filter.customerName = { $regex: req.query.search, $options: 'i' };
 
-  const cursor = Lead.find(filter).lean().cursor();
+  const cursor = Lead.find(filter)
+    .populate('projectId', 'name displayId')
+    .populate('plotId', 'plotNumber expectedRegistrationDate')
+    .lean()
+    .cursor();
+
   streamCSV(req, res, cursor, configs.customers.columns, configs.customers.filename);
 });
 
@@ -125,7 +208,11 @@ exports.exportUsers = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.role) filter.role = req.query.role;
 
-  const cursor = User.find(filter).lean().cursor();
+  const cursor = User.find(filter)
+    .populate('groupId', 'name')
+    .lean()
+    .cursor();
+
   streamCSV(req, res, cursor, configs.staff.columns, configs.staff.filename);
 });
 
@@ -136,42 +223,40 @@ exports.exportChannelPartners = asyncHandler(async (req, res) => {
 
 exports.exportReports = asyncHandler(async (req, res) => {
   const { tab } = req.query;
-  const Project = require('../models/Project');
-  const Attendance = require('../models/Attendance');
-  const User = require('../models/User');
+  const { startDate, endDate } = getDateFilter(req.query);
 
-  const configMap = {
-    projects: { config: configs.reportProjects, data: null },
-    attendance: { config: configs.reportAttendance, data: null },
-    staff: { config: configs.reportStaff, data: null },
-    'leads-trend': { config: configs.reportLeadsTrend, data: null },
-    'lead-contribution': { config: configs.reportLeadContribution, data: null },
-    'channel-partner-performance': { config: configs.reportChannelPartnerPerformance, data: null },
-  };
-
-  const entry = configMap[tab];
-  if (!entry) {
-    res.status(400).json({ success: false, error: 'Invalid report tab' });
-    return;
-  }
-
-  let cursor;
   switch (tab) {
-    case 'projects':
-      cursor = Project.find().lean().cursor();
-      break;
-    case 'attendance':
-      cursor = Attendance.find().sort('-date').lean().cursor();
-      break;
-    case 'staff':
-      cursor = User.find({ role: 'staff' }).lean().cursor();
-      break;
-    default:
-      res.status(400).json({ success: false, error: 'Tab does not support streaming export' });
+    case 'projects': {
+      const { rows } = await buildProjectsReportRows({ startDate, endDate });
+      streamArrayCSV(req, res, rows, configs.reportProjects.columns, configs.reportProjects.filename);
       return;
-  }
-
-  if (cursor) {
-    streamCSV(req, res, cursor, entry.config.columns, entry.config.filename);
+    }
+    case 'attendance': {
+      const { rows } = await buildAttendanceReportRows({ startDate, endDate });
+      streamArrayCSV(req, res, rows, configs.reportAttendance.columns, configs.reportAttendance.filename);
+      return;
+    }
+    case 'staff': {
+      const { rows } = await buildStaffReportRows({ startDate, endDate });
+      streamArrayCSV(req, res, rows, configs.reportStaff.columns, configs.reportStaff.filename);
+      return;
+    }
+    case 'leads-trend': {
+      const { rows } = await buildLeadsTrendRows({ startDate, endDate });
+      streamArrayCSV(req, res, rows, configs.reportLeadsTrend.columns, configs.reportLeadsTrend.filename);
+      return;
+    }
+    case 'lead-contribution': {
+      const { rows } = await buildLeadContributionRows({ startDate, endDate });
+      streamArrayCSV(req, res, rows, configs.reportLeadContribution.columns, configs.reportLeadContribution.filename);
+      return;
+    }
+    case 'channel-partner-performance': {
+      const { rows } = await buildChannelPartnerPerformanceRows({ startDate, endDate });
+      streamArrayCSV(req, res, rows, configs.reportChannelPartnerPerformance.columns, configs.reportChannelPartnerPerformance.filename);
+      return;
+    }
+    default:
+      res.status(400).json({ success: false, error: 'Invalid report tab' });
   }
 });
