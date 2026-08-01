@@ -163,6 +163,26 @@ exports.exportProjectDetail = asyncHandler(async (req, res) => {
     if (l.phone) leadByPhone.set(String(l.phone), l);
   }
 
+  const allStaffIds = new Set();
+  for (const p of plots) {
+    if (p.bookedBy?.staffId) allStaffIds.add(p.bookedBy.staffId);
+    if (p.pendingApproval?.requestedBy) allStaffIds.add(p.pendingApproval.requestedBy);
+  }
+
+  const staffById = new Map();
+  if (allStaffIds.size > 0) {
+    const mongoose = require('mongoose');
+    const objectIds = [...allStaffIds]
+      .filter(sid => mongoose.Types.ObjectId.isValid(sid))
+      .map(sid => new mongoose.Types.ObjectId(sid));
+    if (objectIds.length > 0) {
+      const staffUsers = await User.find({ _id: { $in: objectIds } }).lean();
+      for (const u of staffUsers) {
+        staffById.set(String(u._id), u);
+      }
+    }
+  }
+
   const docs = plots.map(plot => {
     const leadIdCandidate = plot.bookedBy?.leadId || plot.pendingApproval?.leadId;
     let lead = leadIdCandidate ? leadById.get(String(leadIdCandidate)) : undefined;
@@ -185,7 +205,10 @@ exports.exportProjectDetail = asyncHandler(async (req, res) => {
       };
     }
 
-    return { project, plot, lead: lead || null, latestFollowUp };
+    const staffId = plot.bookedBy?.staffId || plot.pendingApproval?.requestedBy;
+    const staff = staffId ? staffById.get(String(staffId)) : null;
+
+    return { project, plot, lead: lead || null, latestFollowUp, staff: staff || null };
   });
 
   streamArrayCSV(req, res, docs, configs.projectDetail.columns, configs.projectDetail.filename);

@@ -244,10 +244,14 @@ exports.bookPlot = asyncHandler(async (req, res, next) => {
           paymentStatus,
           paymentMethod,
           type: 'customer',
+          advanceAmount: 0,
+          balanceAmount: 0,
           bank: req.body.bank || '',
           bankFollowerName: req.body.bankFollowerName || '',
           bankFollowerPhone: req.body.bankFollowerPhone || '',
+          loanStage: 'Not Applied',
           leadId: req.body.leadId || '',
+          bookedAt: today,
         },
         expectedRegistrationDate: req.body.expectedRegistrationDate || '',
       };
@@ -386,6 +390,7 @@ exports.approveBooking = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('No pending approval for this plot', 400));
   }
 
+  const today = new Date().toISOString().split('T')[0];
   const approval = plot.pendingApproval;
   const isCancellation = approval.requestType === 'cancellation';
 
@@ -445,10 +450,15 @@ exports.approveBooking = asyncHandler(async (req, res, next) => {
     paymentStatus: approval.paymentStatus || 'Not Paid',
     paymentMethod,
     type: 'customer',
+    advanceAmount: 0,
+    balanceAmount: 0,
     bank: approval.bank || '',
     bankFollowerName: approval.bankFollowerName || '',
     bankFollowerPhone: approval.bankFollowerPhone || '',
+    loanStage: 'Not Applied',
     leadId: approval.leadId || '',
+    staffId: approval.requestedBy || '',
+    bookedAt: today,
   };
   plot.pendingApproval = undefined;
 

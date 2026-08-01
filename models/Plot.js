@@ -85,6 +85,8 @@ const PlotSchema = new mongoose.Schema(
       bankFollowerPhone: { type: String },
       loanStage: { type: String, default: 'Not Applied' },
       leadId: { type: String },
+      staffId: { type: String },
+      bookedAt: { type: String },
     },
     pendingApproval: {
       requestType: {
