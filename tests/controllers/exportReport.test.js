@@ -11,7 +11,7 @@ function parseCSVLine(line) {
 }
 
 describe('Reports & Export endpoints', () => {
-  let adminToken, staffToken;
+  let adminToken, staffToken, staffUser;
   let project, bookedPlot;
 
   beforeEach(async () => {
@@ -19,6 +19,7 @@ describe('Reports & Export endpoints', () => {
     adminToken = admin.token;
     const staff = await createTestUser();
     staffToken = staff.token;
+    staffUser = staff.user;
 
     project = await Project.create({
       name: 'Export Test Project',
@@ -32,7 +33,7 @@ describe('Reports & Export endpoints', () => {
     const availablePlot = await Plot.create({ projectId: project._id, plotNumber: 'A1', status: 'Available' });
     bookedPlot = await Plot.create({ projectId: project._id, plotNumber: 'A2', status: 'Booked' });
 
-    await Lead.create({
+    const lead = await Lead.create({
       customerName: 'Export Customer',
       phone: `98${Date.now()}`,
       status: 'Customer',
@@ -40,7 +41,18 @@ describe('Reports & Export endpoints', () => {
       projectId: project._id,
       plotId: bookedPlot._id,
       sourceType: 'Staff',
+      assignedTo: staffUser._id,
     });
+
+    bookedPlot.bookedBy = {
+      name: lead.customerName,
+      phone: lead.phone,
+      paymentMethod: 'LOAN',
+      paymentStatus: 'Not Paid',
+      leadId: String(lead._id),
+      bookedAt: new Date().toISOString().split('T')[0],
+    };
+    await bookedPlot.save();
 
     void availablePlot;
   });
@@ -69,6 +81,53 @@ describe('Reports & Export endpoints', () => {
         .set('Authorization', `Bearer ${adminToken}`);
       expect(res.status).toBe(200);
       expect(res.body.data.totalProjects).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should return operations metrics for admin', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/operations-metrics')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.totalBookings).toBeGreaterThanOrEqual(1);
+      expect(res.body.data.totalLoans).toBeGreaterThanOrEqual(1);
+      expect(res.body.data.registrationPending).toBeGreaterThanOrEqual(1);
+      expect(res.body.data.todaysRegistrations).toBeDefined();
+      expect(res.body.data.pendingPaymentRegistrations).toBeDefined();
+      expect(res.body.data.bookingPayments).toBeDefined();
+    });
+
+    it('should return dashboard lead charts for admin', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/dashboard-charts')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data.monthlyTrend)).toBe(true);
+      expect(Array.isArray(res.body.data.sourceBreakdown)).toBe(true);
+      expect(res.body.data.totalLeads).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should return 403 for staff on dashboard-charts', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/dashboard-charts')
+        .set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(403);
+    });
+
+    it('should allow staff on operations-metrics with scoped counts', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/operations-metrics')
+        .set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.totalBookings).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should still return 403 for staff on legacy admin report routes', async () => {
+      const res = await request(app)
+        .get('/api/v1/reports/projects')
+        .set('Authorization', `Bearer ${staffToken}`);
+      expect(res.status).toBe(403);
     });
   });
 
@@ -156,13 +215,75 @@ describe('Reports & Export endpoints', () => {
       expect(res.headers['content-type']).toContain('text/csv');
     });
 
-    it('should export projects CSV', async () => {
+    it('should export loans CSV (Customer + LOAN only) via /export/customers', async () => {
+      await Lead.create({
+        customerName: 'Cash Only Customer',
+        phone: `97${Date.now()}`,
+        status: 'Customer',
+        paymentMethod: 'CASH',
+        sourceType: 'Direct',
+      });
+
+      const res = await request(app)
+        .get('/api/v1/export/customers?status=Customer&paymentMethod=LOAN')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-disposition']).toContain('customers');
+      expect(res.text).toContain('Export Customer');
+      expect(res.text).not.toContain('Cash Only Customer');
+    });
+
+    it('should export projects CSV with unique project rows and plot metrics', async () => {
       const res = await request(app)
         .get('/api/v1/export/projects')
         .set('Authorization', `Bearer ${adminToken}`);
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toContain('text/csv');
       expect(res.headers['content-disposition']).toContain('projects');
+
+      const lines = res.text.replace(/^\uFEFF/, '').split('\n').filter(Boolean);
+      // Header + exactly 1 row for the 1 created test project
+      expect(lines.length).toBe(2);
+      const header = parseCSVLine(lines[0]);
+      expect(header).toContain('Project Name');
+      expect(header).toContain('Status');
+      expect(header).toContain('Location');
+      expect(header).toContain('Total Plots');
+      expect(header).toContain('Available Plots');
+      expect(header).toContain('Booked Plots');
+      expect(header).toContain('Registered Plots');
+
+      const row = parseCSVLine(lines[1]);
+      expect(row[header.indexOf('Project Name')]).toBe('Export Test Project');
+      expect(row[header.indexOf('Total Plots')]).toBe('2');
+      expect(row[header.indexOf('Available Plots')]).toBe('1');
+      expect(row[header.indexOf('Booked Plots')]).toBe('1');
+    });
+
+    it('should export single project detail CSV', async () => {
+      const res = await request(app)
+        .get(`/api/v1/export/project-detail?id=${project._id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/csv');
+      const header = parseCSVLine(res.text.replace(/^\uFEFF/, '').split('\n')[0]);
+      expect(header).toContain('Plot Number');
+      expect(header).toContain('Booked Customer');
+    });
+
+    it('should honor project export filters', async () => {
+      const res = await request(app)
+        .get('/api/v1/export/projects?search=Export%20Test')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      const lines = res.text.replace(/^\uFEFF/, '').split('\n').filter(Boolean);
+      expect(lines.length).toBeGreaterThanOrEqual(2);
+      const header = parseCSVLine(lines[0]);
+      const projectNameIdx = header.indexOf('Project Name');
+      for (let i = 1; i < lines.length; i += 1) {
+        const row = parseCSVLine(lines[i]);
+        expect(row[projectNameIdx]).toBe('Export Test Project');
+      }
     });
 
     it('should export channel-partners CSV', async () => {

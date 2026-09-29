@@ -104,7 +104,7 @@ exports.uploadFiles = asyncHandler(async (req, res, next) => {
       if (!file.buffer) {
         try { await fs.unlink(source); } catch {}
       }
-      return next(new ErrorResponse(`Invalid file content: ${file.originalname} does not match declared type`, 400));
+      return next(new ErrorResponse(`Invalid format. The file content does not match a supported image format`, 400));
     }
 
     if (useS3) {

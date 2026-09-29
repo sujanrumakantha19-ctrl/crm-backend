@@ -1,7 +1,16 @@
 const nodemailer = require('nodemailer');
 const logger = require('./logger');
 
+const isTestEnv = () =>
+  process.env.NODE_ENV === 'test' || typeof process.env.JEST_WORKER_ID !== 'undefined';
+
 const sendEmail = async (options) => {
+  // Never send real emails during automated tests.
+  if (isTestEnv()) {
+    logger.info('[TEST] Email send skipped (test environment).');
+    return;
+  }
+
   // Create a transporter
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,

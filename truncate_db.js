@@ -19,7 +19,7 @@ const Plot = require('./models/Plot');
 const Counter = require('./models/Counter');
 const WhatsAppMessage = require('./models/WhatsAppMessage');
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://Sudexhub:Sudexhub2026@cluster0.ivs0qfk.mongodb.net/CRM';
+const MONGODB_URI = process.env.MONGODB_URI;
 const KEEP_EMAILS = ['admin@gmail.com', 'staff@gmail.com', 'cp@gmail.com'];
 const DEFAULT_PASSWORD = '12345678';
 

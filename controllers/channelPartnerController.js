@@ -29,8 +29,96 @@ exports.getChannelPartner = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/channel-partners
 // @access  Private/Admin
 exports.createChannelPartner = asyncHandler(async (req, res, next) => {
+  const User = require('../models/User');
+  const { generateRandomPassword } = require('../utils/passwordGen');
+
+  const name = req.body.name;
+  const email = req.body.email ? req.body.email.trim().toLowerCase() : undefined;
+  const phone = req.body.phone;
+  const initials = req.body.initials
+    || (name ? name.trim().split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : 'P');
+
+  // ── Build a linked login account (role: partner) ──
+  let userId = req.body.userId;
+  let emailSent = false;
+  let reused = false;
+
+  if (!userId) {
+    const password = generateRandomPassword(10);
+    try {
+      const linkedUser = await User.create({
+        name,
+        initials,
+        role: 'partner',
+        email,
+        phone,
+        isActive: true,
+        password,
+      });
+      userId = linkedUser._id;
+
+      try {
+        const { getAccountCredentialsTemplate } = require('../utils/emailTemplates');
+        const sendEmail = require('../utils/sendEmail');
+        const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login`;
+        await sendEmail({
+          email,
+          subject: `Your Channel Partner Account - ${process.env.FROM_NAME || 'Samy&Co'}`,
+          message: getAccountCredentialsTemplate({
+            userName: name,
+            email,
+            password,
+            loginUrl,
+            roleLabel: 'Channel Partner',
+          }),
+        });
+        emailSent = true;
+      } catch (err) {
+        const logger = require('../utils/logger');
+        logger.error(`Failed to send channel partner credentials email to ${email}: ${err.message}`);
+      }
+    } catch (err) {
+      // Duplicate email → try to reuse the existing partner login account
+      if (err.code === 11000 && email) {
+        const existing = await User.findOne({ email });
+        if (!existing) {
+          return next(new ErrorResponse('Could not create the channel partner login account', 500));
+        }
+        if (existing.role !== 'partner') {
+          return next(new ErrorResponse('This email already belongs to a non-partner account', 400));
+        }
+        userId = existing._id;
+        reused = true;
+
+        try {
+          const { getAccountCredentialsTemplate } = require('../utils/emailTemplates');
+          const sendEmail = require('../utils/sendEmail');
+          const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login`;
+          await sendEmail({
+            email,
+            subject: `Your Channel Partner Profile - ${process.env.FROM_NAME || 'Samy&Co'}`,
+            message: getAccountCredentialsTemplate({
+              userName: name,
+              email,
+              password: '',
+              loginUrl,
+              roleLabel: 'Channel Partner',
+              linkedExisting: true,
+            }),
+          });
+          emailSent = true;
+        } catch (emailErr) {
+          const logger = require('../utils/logger');
+          logger.error(`Failed to send channel partner linked email to ${email}: ${emailErr.message}`);
+        }
+      } else {
+        return next(err);
+      }
+    }
+  }
+
   const allowedFields = {
-    userId: req.body.userId,
+    userId,
     name: req.body.name,
     companyName: req.body.companyName,
     phone: req.body.phone,
@@ -51,6 +139,8 @@ exports.createChannelPartner = asyncHandler(async (req, res, next) => {
   res.status(201).json({
     success: true,
     data: channelPartner,
+    emailSent,
+    reused,
   });
 });
 
@@ -69,7 +159,7 @@ exports.updateChannelPartner = asyncHandler(async (req, res, next) => {
     name: req.body.name,
     companyName: req.body.companyName,
     phone: req.body.phone,
-    email: req.body.email,
+    email: req.body.email ? req.body.email.trim().toLowerCase() : undefined,
     city: req.body.city,
     reraId: req.body.reraId,
     totalLeads: req.body.totalLeads,
@@ -86,6 +176,28 @@ exports.updateChannelPartner = asyncHandler(async (req, res, next) => {
     returnDocument: 'after',
     runValidators: true,
   });
+
+  // Keep the linked login User in sync (name/phone/email/isActive) so the
+  // partner's portal access matches their channel-partner profile.
+  if (channelPartner && channelPartner.userId) {
+    const User = require('../models/User');
+    const syncFields = {};
+    if (allowedFields.name !== undefined) syncFields.name = allowedFields.name;
+    if (allowedFields.phone !== undefined) syncFields.phone = allowedFields.phone;
+    if (allowedFields.email !== undefined) syncFields.email = allowedFields.email;
+    if (allowedFields.isActive !== undefined) syncFields.isActive = allowedFields.isActive;
+
+    if (Object.keys(syncFields).length > 0) {
+      try {
+        await User.findByIdAndUpdate(channelPartner.userId, syncFields, {
+          runValidators: true,
+        });
+      } catch (err) {
+        const logger = require('../utils/logger');
+        logger.error(`Failed to sync linked user ${channelPartner.userId} on channel partner update: ${err.message}`);
+      }
+    }
+  }
 
   res.status(200).json({
     success: true,

@@ -9,6 +9,12 @@ const ChannelPartner = require('../models/ChannelPartner');
 const { streamCSV, streamArrayCSV } = require('../utils/csvStream');
 const configs = require('../utils/exportConfigs');
 const {
+  buildProjectExportFilter,
+  buildProjectDetailExportDocsForProject,
+  buildProjectDetailExportDocsFromQuery,
+} = require('../utils/projectDetailExport');
+const { buildLeadExportFilter } = require('../utils/leadExportFilter');
+const {
   getDateFilter,
   buildProjectsReportRows,
   buildStaffReportRows,
@@ -19,15 +25,7 @@ const {
 } = require('./reportController');
 
 exports.exportLeads = asyncHandler(async (req, res) => {
-  const filter = {};
-  if (req.query.status && req.query.status !== 'All') filter.status = req.query.status;
-  if (req.query.search) filter.customerName = { $regex: req.query.search, $options: 'i' };
-
-  if (req.query.assignedTo === 'unassigned') {
-    filter.assignedTo = null;
-  } else if (req.query.assignedTo) {
-    filter.assignedTo = req.query.assignedTo;
-  }
+  const filter = buildLeadExportFilter(req.query);
 
   const query = Lead.find(filter)
     .populate('assignedTo', 'name displayId')
@@ -79,19 +77,41 @@ exports.exportFollowUps = asyncHandler(async (req, res) => {
 });
 
 exports.exportAttendance = asyncHandler(async (req, res) => {
-  const { date, employeeId, month, tab } = req.query;
+  const { date, employeeId, staffId, month, year, tab } = req.query;
+  const targetStaffId = employeeId || staffId || req.query.userId;
   const filter = {};
-  if (date) filter.date = { $regex: `^${date}` };
-  if (month) filter.date = { $regex: `^${month}` };
-  if (employeeId) filter.staffId = employeeId;
+  if (date) {
+    filter.date = { $regex: `^${date}` };
+  } else if (month) {
+    filter.date = { $regex: `^${month}` };
+  } else if (year) {
+    filter.date = { $regex: `^${year}` };
+  }
 
-  const query = Attendance.find(filter).lean();
+  if (targetStaffId) {
+    const mongoose = require('mongoose');
+    const matches = [String(targetStaffId)];
+    if (mongoose.Types.ObjectId.isValid(targetStaffId)) {
+      matches.push(new mongoose.Types.ObjectId(targetStaffId));
+    }
+    filter.$or = [
+      { staffId: { $in: matches } },
+      { userId: { $in: matches } },
+    ];
+  }
+
+  const query = Attendance.find(filter).sort({ date: -1 }).lean();
 
   const isModal = tab === 'details';
   const cfg = isModal ? configs.attendanceModal : configs.attendanceMain;
 
+  let filename = cfg.filename;
+  if (date) filename = `attendance-${date}`;
+  else if (month) filename = `attendance-${month}`;
+  else if (year) filename = `attendance-${year}`;
+
   const cursor = query.cursor();
-  streamCSV(req, res, cursor, cfg.columns, cfg.filename);
+  streamCSV(req, res, cursor, cfg.columns, filename);
 });
 
 exports.exportTasks = asyncHandler(async (req, res) => {
@@ -108,32 +128,50 @@ exports.exportTasks = asyncHandler(async (req, res) => {
 });
 
 exports.exportProjects = asyncHandler(async (req, res) => {
-  const cursor = Project.aggregate([
-    {
-      $lookup: {
-        from: 'plots',
-        localField: '_id',
-        foreignField: 'projectId',
-        as: 'plots',
-      },
-    },
-    {
-      $addFields: {
-        availablePlots: {
-          $size: {
-            $filter: {
-              input: '$plots',
-              as: 'p',
-              cond: { $eq: ['$$p.status', 'Available'] },
-            },
-          },
-        },
-      },
-    },
-    { $project: { plots: 0 } },
-  ]).cursor();
+  const filter = buildProjectExportFilter(req.query);
 
-  streamCSV(req, res, cursor, configs.projects.columns, configs.projects.filename);
+  const projects = await Project.find(filter).sort({ name: 1 }).lean();
+  if (projects.length === 0) {
+    streamArrayCSV(req, res, [], configs.projects.columns, configs.projects.filename);
+    return;
+  }
+
+  const projectIds = projects.map((p) => p._id);
+
+  const plotStats = await Plot.aggregate([
+    { $match: { projectId: { $in: projectIds } } },
+    {
+      $group: {
+        _id: { projectId: '$projectId', status: '$status' },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const statsMap = new Map();
+  for (const stat of plotStats) {
+    const pid = String(stat._id.projectId);
+    if (!statsMap.has(pid)) {
+      statsMap.set(pid, { Available: 0, Booked: 0, Registered: 0 });
+    }
+    const current = statsMap.get(pid);
+    if (current && current[stat._id.status] !== undefined) {
+      current[stat._id.status] = stat.count;
+    }
+  }
+
+  const rows = projects.map((p) => {
+    const pid = String(p._id);
+    const stats = statsMap.get(pid) || { Available: 0, Booked: 0, Registered: 0 };
+    return {
+      ...p,
+      availablePlots: stats.Available,
+      bookedPlots: stats.Booked,
+      registeredPlots: stats.Registered,
+    };
+  });
+
+  streamArrayCSV(req, res, rows, configs.projects.columns, configs.projects.filename);
 });
 
 exports.exportProjectDetail = asyncHandler(async (req, res) => {
@@ -149,74 +187,12 @@ exports.exportProjectDetail = asyncHandler(async (req, res) => {
     return;
   }
 
-  const plots = await Plot.find({ projectId: id }).sort({ plotNumber: 1 }).lean();
-
-  const plotIds = plots.map(p => p._id);
-  const leads = await Lead.find({
-    $or: [{ projectId: id }, { plotId: { $in: plotIds } }],
-  }).lean();
-
-  const leadById = new Map();
-  const leadByPhone = new Map();
-  for (const l of leads) {
-    leadById.set(String(l._id), l);
-    if (l.phone) leadByPhone.set(String(l.phone), l);
-  }
-
-  const allStaffIds = new Set();
-  for (const p of plots) {
-    if (p.bookedBy?.staffId) allStaffIds.add(p.bookedBy.staffId);
-    if (p.pendingApproval?.requestedBy) allStaffIds.add(p.pendingApproval.requestedBy);
-  }
-
-  const staffById = new Map();
-  if (allStaffIds.size > 0) {
-    const mongoose = require('mongoose');
-    const objectIds = [...allStaffIds]
-      .filter(sid => mongoose.Types.ObjectId.isValid(sid))
-      .map(sid => new mongoose.Types.ObjectId(sid));
-    if (objectIds.length > 0) {
-      const staffUsers = await User.find({ _id: { $in: objectIds } }).lean();
-      for (const u of staffUsers) {
-        staffById.set(String(u._id), u);
-      }
-    }
-  }
-
-  const docs = plots.map(plot => {
-    const leadIdCandidate = plot.bookedBy?.leadId || plot.pendingApproval?.leadId;
-    let lead = leadIdCandidate ? leadById.get(String(leadIdCandidate)) : undefined;
-    if (!lead && plot.bookedBy?.phone) {
-      lead = leadByPhone.get(String(plot.bookedBy.phone));
-    }
-
-    let latestFollowUp;
-    if (lead && Array.isArray(lead.followUps) && lead.followUps.length > 0) {
-      const sorted = [...lead.followUps].sort((a, b) => {
-        const da = a.date ? new Date(a.date).getTime() : 0;
-        const db = b.date ? new Date(b.date).getTime() : 0;
-        return db - da;
-      });
-      const last = sorted[0];
-      latestFollowUp = {
-        date: last.date || '',
-        outcome: last.outcome || '',
-        notes: last.notes || '',
-      };
-    }
-
-    const staffId = plot.bookedBy?.staffId || plot.pendingApproval?.requestedBy;
-    const staff = staffId ? staffById.get(String(staffId)) : null;
-
-    return { project, plot, lead: lead || null, latestFollowUp, staff: staff || null };
-  });
-
+  const docs = await buildProjectDetailExportDocsForProject(id);
   streamArrayCSV(req, res, docs, configs.projectDetail.columns, configs.projectDetail.filename);
 });
 
 exports.exportCustomers = asyncHandler(async (req, res) => {
-  const filter = { status: 'Customer' };
-  if (req.query.search) filter.customerName = { $regex: req.query.search, $options: 'i' };
+  const filter = buildLeadExportFilter(req.query, { status: 'Customer' });
 
   const cursor = Lead.find(filter)
     .populate('projectId', 'name displayId')

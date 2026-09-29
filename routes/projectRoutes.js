@@ -26,7 +26,7 @@ router.route('/sync-plots').post(protect, authorize('admin'), syncProjectPlots);
 
 router
   .route('/')
-  .get(protect, advancedResults(Project, 'availablePlots', ['name', 'displayId']), getProjects)
+  .get(protect, advancedResults(Project, ['availablePlots', 'inventoryPlotCount'], ['name', 'displayId']), getProjects)
   .post(protect, authorize('admin', 'staff'), createProjectValidator, validate, createProject);
 
 router

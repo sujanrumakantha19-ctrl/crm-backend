@@ -82,7 +82,7 @@ const imageFilter = (req, file, cb) => {
   if (ALLOWED_TYPES.images.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new ErrorResponse('Only image files (JPEG, PNG, WebP, GIF) are allowed', 400), false);
+    cb(new ErrorResponse('Invalid format. Only image files (JPG, PNG, WebP) are allowed for profile pictures', 400), false);
   }
 };
 

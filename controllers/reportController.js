@@ -1,4 +1,5 @@
 const asyncHandler = require('../middleware/async');
+const mongoose = require('mongoose');
 const Project = require('../models/Project');
 const Plot = require('../models/Plot');
 const Lead = require('../models/Lead');
@@ -110,6 +111,7 @@ async function buildProjectsReportRows({ startDate, endDate, skip, limit }) {
         location: 1,
         status: 1,
         surveyNumber: 1,
+        dtcpNumber: 1,
         createdAt: 1,
         plotCount: { $size: '$plots' },
         booked: {
@@ -563,6 +565,335 @@ async function buildChannelPartnerPerformanceRows({ startDate, endDate }) {
   return { total: merged.length, rows: merged };
 }
 
+// Build plot booking-date filter (bookedBy.bookedAt string, fallback updatedAt for legacy rows)
+function buildPlotBookingDateFilter(startDate, endDate) {
+  if (!startDate && !endDate) return null;
+
+  const bookedAtRange = {};
+  if (startDate) bookedAtRange.$gte = startDate.toISOString().slice(0, 10);
+  if (endDate) bookedAtRange.$lte = endDate.toISOString().slice(0, 10);
+
+  const updatedAtRange = {};
+  if (startDate) updatedAtRange.$gte = startDate;
+  if (endDate) updatedAtRange.$lte = endDate;
+
+  const bookedAtClause = Object.keys(bookedAtRange).length > 0
+    ? { 'bookedBy.bookedAt': bookedAtRange }
+    : null;
+
+  const legacyUpdatedClause = {
+    $and: [
+      {
+        $or: [
+          { 'bookedBy.bookedAt': { $exists: false } },
+          { 'bookedBy.bookedAt': null },
+          { 'bookedBy.bookedAt': '' },
+        ],
+      },
+      { updatedAt: updatedAtRange },
+    ],
+  };
+
+  if (bookedAtClause) {
+    return { $or: [bookedAtClause, legacyUpdatedClause] };
+  }
+  return legacyUpdatedClause;
+}
+
+async function resolveStaffPlotScope(assignedTo) {
+  if (!assignedTo) return null;
+
+  const myLeads = await Lead.find({ assignedTo }).select('_id plotId plotIds');
+  const leadIds = myLeads.map((l) => String(l._id));
+  const legacyPlotIds = myLeads
+    .flatMap((l) => [l.plotId, ...(l.plotIds || [])])
+    .filter(Boolean);
+
+  const orClause = [
+    { 'bookedBy.staffId': assignedTo },
+    { 'pendingApproval.requestedBy': assignedTo },
+  ];
+
+  if (leadIds.length > 0) {
+    orClause.push({ 'bookedBy.leadId': { $in: leadIds } });
+    orClause.push({ 'pendingApproval.leadId': { $in: leadIds } });
+  }
+
+  if (legacyPlotIds.length > 0) {
+    orClause.push({ _id: { $in: legacyPlotIds } });
+  }
+
+  return { $or: orClause };
+}
+
+function mergeMatchClauses(...clauses) {
+  const parts = clauses.filter(Boolean);
+  if (parts.length === 0) return {};
+  if (parts.length === 1) return parts[0];
+  return { $and: parts };
+}
+
+const { getTodayDateStringIST } = require('../utils/dateIST');
+
+function categorizeDashboardSource(sourceType) {
+  if (sourceType === 'Channel Partner') return 'Channel Partners';
+  if (sourceType === 'Staff') return 'Staff Added';
+  if (sourceType === 'Admin' || sourceType === 'Admin Added' || sourceType === 'Direct') {
+    return 'Admin Added';
+  }
+  return 'Others';
+}
+
+async function buildDashboardLeadCharts() {
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const now = new Date();
+  const months = [];
+
+  for (let i = 5; i >= 0; i -= 1) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push({ year: d.getFullYear(), monthIndex: d.getMonth(), name: monthNames[d.getMonth()] });
+  }
+
+  const startDate = new Date(months[0].year, months[0].monthIndex, 1);
+  const endDate = new Date(
+    months[months.length - 1].year,
+    months[months.length - 1].monthIndex + 1,
+    0,
+    23,
+    59,
+    59,
+    999,
+  );
+  const leadMatch = buildLeadDateMatch(startDate, endDate);
+
+  const monthlyAgg = await Lead.aggregate([
+    ...(Object.keys(leadMatch).length > 0 ? [{ $match: leadMatch }] : []),
+    {
+      $project: {
+        created: { $ifNull: ['$createdAt', '$dateAdded'] },
+        status: 1,
+      },
+    },
+    {
+      $project: {
+        month: { $month: '$created' },
+        year: { $year: '$created' },
+        status: 1,
+      },
+    },
+    {
+      $group: {
+        _id: { year: '$year', month: '$month' },
+        leads: { $sum: 1 },
+        bookings: { $sum: { $cond: [{ $eq: ['$status', 'Customer'] }, 1, 0] } },
+      },
+    },
+  ]);
+
+  const aggMap = new Map(monthlyAgg.map((item) => [`${item._id.year}-${item._id.month}`, item]));
+  const monthlyTrend = months.map((m) => {
+    const found = aggMap.get(`${m.year}-${m.monthIndex + 1}`);
+    return {
+      name: m.name,
+      Leads: found?.leads || 0,
+      Bookings: found?.bookings || 0,
+    };
+  });
+
+  const { rows } = await buildLeadContributionRows({
+    startDate: null,
+    endDate: null,
+    skip: 0,
+    limit: 0,
+  });
+
+  const buckets = {
+    'Channel Partners': 0,
+    'Staff Added': 0,
+    'Admin Added': 0,
+    Others: 0,
+  };
+
+  rows.forEach((row) => {
+    const category = categorizeDashboardSource(row.sourceType);
+    buckets[category] += row.totalLeads;
+  });
+
+  const grandTotal = Object.values(buckets).reduce((sum, count) => sum + count, 0) || 1;
+  const sourceColors = {
+    'Channel Partners': '#3B82F6',
+    'Staff Added': '#F59E0B',
+    'Admin Added': '#10B981',
+    Others: '#8B5CF6',
+  };
+
+  const sourceBreakdown = Object.entries(buckets).map(([name, count]) => ({
+    name,
+    count,
+    value: Math.round((count / grandTotal) * 100),
+    color: sourceColors[name],
+  }));
+
+  return { monthlyTrend, sourceBreakdown, totalLeads: grandTotal };
+}
+
+async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
+  const staffScope = await resolveStaffPlotScope(assignedTo);
+  const dateFilter = buildPlotBookingDateFilter(startDate, endDate);
+
+  const bookingBase = mergeMatchClauses(
+    {
+      status: { $in: ['Booked', 'Registered'] },
+      bookedBy: { $exists: true, $ne: null },
+    },
+    staffScope,
+    dateFilter,
+  );
+
+  const pendingBase = mergeMatchClauses(
+    {
+      status: 'Booked',
+      bookedBy: { $exists: true, $ne: null },
+    },
+    staffScope,
+    dateFilter,
+  );
+
+  const loanLeadMatch = { status: 'Customer', paymentMethod: 'LOAN' };
+  const customerLeadMatch = { status: 'Customer' };
+  if (assignedTo && mongoose.Types.ObjectId.isValid(assignedTo)) {
+    loanLeadMatch.assignedTo = new mongoose.Types.ObjectId(assignedTo);
+    customerLeadMatch.assignedTo = new mongoose.Types.ObjectId(assignedTo);
+  }
+  const [totalLoans, totalCustomers] = await Promise.all([
+    Lead.countDocuments(loanLeadMatch),
+    Lead.countDocuments(customerLeadMatch),
+  ]);
+
+  const [bookingStats] = await Plot.aggregate([
+    { $match: bookingBase },
+    {
+      $group: {
+        _id: null,
+        totalBookings: { $sum: 1 },
+        notPaid: {
+          $sum: {
+            $cond: [{ $eq: [{ $ifNull: ['$bookedBy.paymentStatus', 'Not Paid'] }, 'Not Paid'] }, 1, 0],
+          },
+        },
+        partiallyPaid: {
+          $sum: {
+            $cond: [{ $eq: ['$bookedBy.paymentStatus', 'Partially Paid'] }, 1, 0],
+          },
+        },
+        advancePaid: {
+          $sum: {
+            $cond: [{ $eq: ['$bookedBy.paymentStatus', 'Advance Paid'] }, 1, 0],
+          },
+        },
+        advanceNotPaid: {
+          $sum: {
+            $cond: [{ $eq: ['$bookedBy.paymentStatus', 'Advance Not Paid'] }, 1, 0],
+          },
+        },
+      },
+    },
+  ]);
+
+  const [pendingStats] = await Plot.aggregate([
+    { $match: pendingBase },
+    { $group: { _id: null, count: { $sum: 1 } } },
+  ]);
+
+  const todayStr = getTodayDateStringIST();
+
+  const todaysRegistrationsBase = mergeMatchClauses(
+    {
+      status: 'Booked',
+      expectedRegistrationDate: { $exists: true, $nin: [null, ''] },
+      $expr: {
+        $eq: [
+          { $substrCP: [{ $toString: '$expectedRegistrationDate' }, 0, 10] },
+          todayStr,
+        ],
+      },
+    },
+    staffScope,
+  );
+
+  const pendingPaymentBase = mergeMatchClauses(
+    {
+      status: 'Registered',
+      $expr: {
+        $ne: [
+          { $ifNull: ['$bookedBy.paymentStatus', { $ifNull: ['$paymentStatus', 'Not Paid'] }] },
+          'Fully Paid',
+        ],
+      },
+    },
+    staffScope,
+  );
+
+  const [[todaysRegStats], [pendingPaymentStats]] = await Promise.all([
+    Plot.aggregate([
+      { $match: todaysRegistrationsBase },
+      { $group: { _id: null, count: { $sum: 1 } } },
+    ]),
+    Plot.aggregate([
+      { $match: pendingPaymentBase },
+      { $group: { _id: null, count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  return {
+    totalLoans,
+    totalCustomers,
+    registrationPending: pendingStats?.count || 0,
+    totalBookings: bookingStats?.totalBookings || 0,
+    todaysRegistrations: todaysRegStats?.count || 0,
+    pendingPaymentRegistrations: pendingPaymentStats?.count || 0,
+    bookingPayments: {
+      notPaid: bookingStats?.notPaid || 0,
+      partiallyPaid: bookingStats?.partiallyPaid || 0,
+      advancePaid: bookingStats?.advancePaid || 0,
+      advanceNotPaid: bookingStats?.advanceNotPaid || 0,
+    },
+  };
+}
+
+// @desc    Operations dashboard metrics (loans, registrations pending, bookings, payment breakdown)
+// @route   GET /api/v1/reports/operations-metrics
+// @access  Private/Admin + Staff (staff auto-scoped to assigned bookings)
+exports.getOperationsMetrics = asyncHandler(async (req, res) => {
+  const { startDate, endDate } = getDateFilter(req.query);
+
+  let assignedTo = null;
+  if (req.user.role === 'staff') {
+    assignedTo = String(req.user.id || req.user._id);
+  } else if (req.query.assignedTo) {
+    assignedTo = String(req.query.assignedTo);
+  }
+
+  const data = await buildOperationsMetrics({ startDate, endDate, assignedTo });
+
+  res.status(200).json({
+    success: true,
+    data,
+  });
+});
+
+// @desc    Admin dashboard lead charts (monthly trend + source breakdown)
+// @route   GET /api/v1/reports/dashboard-charts
+// @access  Private/Admin
+exports.getDashboardLeadCharts = asyncHandler(async (req, res) => {
+  const data = await buildDashboardLeadCharts();
+
+  res.status(200).json({
+    success: true,
+    data,
+  });
+});
+
 // @desc    Get report summary cards (aggregated counts with date filter)
 // @route   GET /api/v1/reports/summary
 // @access  Private/Admin
@@ -777,6 +1108,8 @@ exports.getChannelPartnerPerformanceReport = asyncHandler(async (req, res) => {
 
 module.exports = {
   getSummary: exports.getSummary,
+  getOperationsMetrics: exports.getOperationsMetrics,
+  getDashboardLeadCharts: exports.getDashboardLeadCharts,
   getProjectsReport: exports.getProjectsReport,
   getStaffReport: exports.getStaffReport,
   getAttendanceReport: exports.getAttendanceReport,
@@ -785,6 +1118,8 @@ module.exports = {
   getChannelPartnerPerformanceReport: exports.getChannelPartnerPerformanceReport,
   getDateFilter,
   buildLeadDateMatch,
+  buildOperationsMetrics,
+  buildDashboardLeadCharts,
   buildProjectsReportRows,
   buildStaffReportRows,
   buildAttendanceReportRows,

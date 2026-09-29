@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const asyncHandler = require('../middleware/async');
+const { getTodayDateStringIST } = require('../utils/dateIST');
 const ErrorResponse = require('../utils/errorResponse');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
@@ -31,26 +32,39 @@ exports.getLeads = asyncHandler(async (req, res, next) => {
 // @desc    Get tab counts for leads in a single query
 // @route   GET /api/v1/leads/counts
 // @access  Private
+// @query   assignedTo, sourceId — optional ObjectId filters; omitted = company-wide (existing behavior)
 exports.getLeadCounts = asyncHandler(async (req, res) => {
-  // Single aggregation that returns all tab counts at once
-  const counts = await Lead.aggregate([
-    {
-      $group: {
-        _id: '$status',
-        total: { $sum: 1 },
-        assigned: {
-          $sum: {
-            $cond: [{ $and: [{ $eq: ['$status', 'Open'] }, { $ifNull: ['$assignedTo', false] }] }, 1, 0]
-          }
-        },
-        unassigned: {
-          $sum: {
-            $cond: [{ $and: [{ $eq: ['$status', 'Open'] }, { $not: [{ $ifNull: ['$assignedTo', false] }] }] }, 1, 0]
-          }
-        },
-      }
+  const match = {};
+  const { assignedTo, sourceId } = req.query;
+  if (assignedTo && mongoose.Types.ObjectId.isValid(assignedTo)) {
+    match.assignedTo = new mongoose.Types.ObjectId(assignedTo);
+  }
+  if (sourceId && mongoose.Types.ObjectId.isValid(sourceId)) {
+    match.sourceId = new mongoose.Types.ObjectId(sourceId);
+  }
+
+  const pipeline = [];
+  if (Object.keys(match).length > 0) {
+    pipeline.push({ $match: match });
+  }
+  pipeline.push({
+    $group: {
+      _id: '$status',
+      total: { $sum: 1 },
+      assigned: {
+        $sum: {
+          $cond: [{ $and: [{ $eq: ['$status', 'Open'] }, { $ifNull: ['$assignedTo', false] }] }, 1, 0]
+        }
+      },
+      unassigned: {
+        $sum: {
+          $cond: [{ $and: [{ $eq: ['$status', 'Open'] }, { $not: [{ $ifNull: ['$assignedTo', false] }] }] }, 1, 0]
+        }
+      },
     }
-  ]);
+  });
+
+  const counts = await Lead.aggregate(pipeline);
 
   const result = { All: 0, Open: 0, Reserved: 0, Qualified: 0, Unqualified: 0, Customer: 0 };
   let grandTotal = 0;
@@ -176,7 +190,7 @@ exports.createLead = asyncHandler(async (req, res, next) => {
   const allowedFields = {
     customerName: req.body.customerName,
     phone: req.body.phone,
-    email: req.body.email,
+    email: req.body.email ? String(req.body.email).trim().toLowerCase() : undefined,
     gender: req.body.gender,
     city: req.body.city,
     budgetMin: req.body.budgetMin,
@@ -205,6 +219,19 @@ exports.createLead = asyncHandler(async (req, res, next) => {
     followUps: req.body.followUps,
   };
 
+  if (req.body.assignedTo) {
+    const assignedUser = await User.findById(req.body.assignedTo).select('displayId name isActive');
+    if (!assignedUser) {
+      return next(new ErrorResponse('Assigned representative not found', 404));
+    }
+    if (assignedUser.isActive === false) {
+      return next(new ErrorResponse('Cannot assign lead to an inactive staff member', 400));
+    }
+    allowedFields.assignedTo = assignedUser._id;
+    allowedFields.assignedToName = req.body.assignedToName || assignedUser.name;
+    allowedFields.assignedToDisplayId = assignedUser.displayId || undefined;
+  }
+
   const lead = await Lead.create(allowedFields);
 
   try {
@@ -223,17 +250,6 @@ exports.createLead = asyncHandler(async (req, res, next) => {
     });
   } catch (logErr) {
     console.error('Failed to create activity log:', logErr.message);
-  }
-
-  if (req.body.assignedTo) {
-    try {
-      const assignedUser = await User.findById(req.body.assignedTo).select('displayId');
-      if (assignedUser && assignedUser.displayId) {
-        lead.assignedToDisplayId = assignedUser.displayId;
-        await lead.save();
-      }
-    } catch (e) {
-    }
   }
 
   res.status(201).json({
@@ -269,7 +285,7 @@ exports.updateLead = asyncHandler(async (req, res, next) => {
   const allowedFields = {
     customerName: req.body.customerName,
     phone: req.body.phone,
-    email: req.body.email,
+    email: req.body.email ? String(req.body.email).trim().toLowerCase() : (req.body.email === '' ? undefined : req.body.email),
     gender: req.body.gender,
     city: req.body.city,
     budgetMin: req.body.budgetMin,
@@ -281,8 +297,6 @@ exports.updateLead = asyncHandler(async (req, res, next) => {
     source: req.body.source,
     sourceType: req.body.sourceType,
     sourceId: req.body.sourceId || (req.body.sourceType === 'Channel Partner' && req.user?.role === 'partner' ? req.user._id : undefined),
-    assignedTo: req.body.assignedTo,
-    assignedToName: req.body.assignedToName,
     status: req.body.status,
     dateAdded: req.body.dateAdded,
     projectId: req.body.projectId,
@@ -304,18 +318,26 @@ exports.updateLead = asyncHandler(async (req, res, next) => {
     }
   });
 
-  // Sync assignedToDisplayId when assignedTo changes
+  // Explicitly handle assignedTo, assignedToName, assignedToDisplayId
   if (req.body.assignedTo !== undefined) {
     if (req.body.assignedTo) {
-      try {
-        const assignedUser = await User.findById(req.body.assignedTo).select('displayId');
-        lead.assignedToDisplayId = (assignedUser && assignedUser.displayId) || undefined;
-      } catch (e) {
-        lead.assignedToDisplayId = undefined;
+      const assignedUser = await User.findById(req.body.assignedTo).select('displayId name isActive');
+      if (!assignedUser) {
+        return next(new ErrorResponse('Assigned representative not found', 404));
       }
+      if (assignedUser.isActive === false) {
+        return next(new ErrorResponse('Cannot assign lead to an inactive staff member', 400));
+      }
+      lead.assignedTo = assignedUser._id;
+      lead.assignedToDisplayId = assignedUser.displayId || undefined;
+      lead.assignedToName = req.body.assignedToName || assignedUser.name || undefined;
     } else {
+      lead.assignedTo = undefined;
+      lead.assignedToName = undefined;
       lead.assignedToDisplayId = undefined;
     }
+  } else if (req.body.assignedToName !== undefined) {
+    lead.assignedToName = req.body.assignedToName || undefined;
   }
 
   await lead.save();
@@ -336,12 +358,26 @@ exports.updateLead = asyncHandler(async (req, res, next) => {
     }
   };
 
-  // plotId changed or cleared: free the previously linked plot.
+  // plotId changed or cleared: free the previously linked plot (transfer, not additive).
   if (previousPlotId && previousPlotId !== currentPlotId) {
     try {
       await releasePlot(previousPlotId);
     } catch (e) {
       console.error('Error auto-syncing old plot status to Available:', e);
+    }
+  }
+
+  // Keep plotIds[] in sync with an explicit primary plotId change.
+  if (req.body.plotId !== undefined && previousPlotId !== currentPlotId) {
+    try {
+      if (previousPlotId && mongoose.Types.ObjectId.isValid(previousPlotId)) {
+        await Lead.updateOne({ _id: lead._id }, { $pull: { plotIds: previousPlotId } });
+      }
+      if (currentPlotId && mongoose.Types.ObjectId.isValid(currentPlotId)) {
+        await Lead.updateOne({ _id: lead._id }, { $addToSet: { plotIds: currentPlotId } });
+      }
+    } catch (e) {
+      console.error('Error syncing lead plotIds on plotId transfer:', e);
     }
   }
 
@@ -545,6 +581,7 @@ exports.getFollowUps = asyncHandler(async (req, res) => {
       status: { $first: '$status' },
       assignedTo: { $first: '$assignedTo' },
       assignedToName: { $first: '$assignedToName' },
+      assignedToDisplayId: { $first: '$assignedToDisplayId' },
       projectId: { $first: '$projectId' },
       nextFollowUpDateLead: { $first: '$nextFollowUpDate' },
       followUps: { $first: '$followUps' }
@@ -556,38 +593,66 @@ exports.getFollowUps = asyncHandler(async (req, res) => {
   const andConditions = [];
 
   if (search) {
-    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    andConditions.push({
-      $or: [
-        { customerName: { $regex: escaped, $options: 'i' } },
-        { phone: { $regex: escaped, $options: 'i' } },
-        { 'followUps.notes': { $regex: escaped, $options: 'i' } }
-      ]
-    });
+    const rawSearch = String(search).trim();
+    const escapedSearch = rawSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const orConditions = [
+      { customerName: { $regex: escapedSearch, $options: 'i' } },
+      { 'followUps.notes': { $regex: escapedSearch, $options: 'i' } },
+      { assignedToName: { $regex: escapedSearch, $options: 'i' } },
+    ];
+
+    // Check if query is an explicit Lead ID: "L-7", "l-7", "l 7", "l7", "L7"
+    const leadIdMatch = rawSearch.match(/^l[\s-]*(\d+)$/i);
+    const staffIdMatch = rawSearch.match(/^(?:staff|emp)[\s-]*(\d+)$/i);
+    const pureNumMatch = rawSearch.match(/^0*(\d+)$/);
+
+    if (leadIdMatch) {
+      const num = parseInt(leadIdMatch[1], 10);
+      orConditions.push({ displayId: `L-${num}` });
+    } else if (staffIdMatch) {
+      const num = parseInt(staffIdMatch[1], 10);
+      orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
+      orConditions.push({ displayId: `STAFF-${num}` });
+      orConditions.push({ assignedToDisplayId: `EMP${String(num).padStart(3, '0')}` });
+    } else if (pureNumMatch) {
+      const num = parseInt(pureNumMatch[1], 10);
+      orConditions.push({ displayId: `L-${num}` });
+      orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
+      orConditions.push({ phone: { $regex: escapedSearch, $options: 'i' } });
+    } else {
+      // General text query (name, partial ID, phone, etc.)
+      orConditions.push({ displayId: { $regex: escapedSearch, $options: 'i' } });
+      orConditions.push({ assignedToDisplayId: { $regex: escapedSearch, $options: 'i' } });
+      orConditions.push({ phone: { $regex: escapedSearch, $options: 'i' } });
+    }
+
+    andConditions.push({ $or: orConditions });
   }
 
   // Date filtering logic
   let dateQuery = null;
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
+  const todayStr = getTodayDateStringIST();
 
   if (date === 'today') {
     dateQuery = { $gte: todayStr, $lte: todayStr + '\uffff' };
   } else if (date === 'yesterday') {
-    const y = new Date(today);
-    y.setDate(today.getDate() - 1);
-    const yStr = y.toISOString().split('T')[0];
+    const y = new Date();
+    y.setDate(y.getDate() - 1);
+    const yStr = y.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     dateQuery = { $gte: yStr, $lte: yStr + '\uffff' };
   } else if (date === 'tomorrow') {
-    const tm = new Date(today);
-    tm.setDate(today.getDate() + 1);
-    const tmStr = tm.toISOString().split('T')[0];
+    const tm = new Date();
+    tm.setDate(tm.getDate() + 1);
+    const tmStr = tm.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     dateQuery = { $gte: tmStr, $lte: tmStr + '\uffff' };
   } else if (date === 'week') {
+    const today = new Date();
     const sevenDaysAgo = new Date(today);
     sevenDaysAgo.setDate(today.getDate() - 7);
-    const startStr = sevenDaysAgo.toISOString().split('T')[0];
-    const endStr = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const startStr = sevenDaysAgo.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const end = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const endStr = end.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     dateQuery = { $gte: startStr, $lte: endStr + '\uffff' };
   } else if (date === 'pending') {
     andConditions.push({
@@ -669,6 +734,7 @@ exports.getFollowUps = asyncHandler(async (req, res) => {
               status: '$status',
               staffId: '$assignedTo',
               staffName: '$assignedToName',
+              staffDisplayId: '$assignedToDisplayId',
               projectId: '$projectId',
               date: '$followUps.date',
               nextFollowUpDate: { $ifNull: ['$followUps.nextFollowUpDate', '$nextFollowUpDateLead'] },

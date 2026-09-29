@@ -36,10 +36,10 @@ const forgotPasswordLimiter = rateLimit({
 });
 
 // Rate limiter for login endpoint
-// Allow 10 requests per 15 minutes per IP to prevent brute-force
+// Allow 100 requests per 15 minutes per IP to prevent brute-force while allowing repeated QA cycles (BUG-2)
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 100,
   message: {
     success: false,
     message: 'Too many login attempts from this IP, please try again after 15 minutes',

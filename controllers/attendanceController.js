@@ -1,6 +1,7 @@
 const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
 const Attendance = require('../models/Attendance');
+const { getTodayDateStringIST } = require('../utils/dateIST');
 
 // Staff users may only access their own attendance records
 function staffUid(req) {
@@ -258,8 +259,7 @@ exports.getAttendanceByDate = asyncHandler(async (req, res, next) => {
 // @route   GET /api/v1/attendance/today
 // @access  Public
 exports.getTodayAttendance = asyncHandler(async (req, res, next) => {
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const today = getTodayDateStringIST();
   const page = parseInt(req.query.page, 10) || 1;
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
   const skip = (page - 1) * limit;

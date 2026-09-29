@@ -61,6 +61,16 @@ describe('Project Model', () => {
     it('should reject invalid category', async () => {
       await expect(Project.create({ ...validProjectData, category: 'Invalid' })).rejects.toThrow();
     });
+
+    it('should store optional dtcpNumber', async () => {
+      const project = await Project.create({ ...validProjectData, dtcpNumber: 'DTCP-12345' });
+      expect(project.dtcpNumber).toBe('DTCP-12345');
+    });
+
+    it('should allow missing dtcpNumber', async () => {
+      const project = await Project.create(validProjectData);
+      expect(project.dtcpNumber).toBeUndefined();
+    });
   });
 
   describe('Owner Info', () => {

@@ -35,6 +35,9 @@ const ProjectSchema = new mongoose.Schema(
     surveyNumber: {
       type: String,
     },
+    dtcpNumber: {
+      type: String,
+    },
     village: {
       type: String,
     },
@@ -91,7 +94,7 @@ const ProjectSchema = new mongoose.Schema(
     owner: {
       name: { type: String },
       phone: { type: String },
-      email: { type: String },
+      email: { type: String, trim: true, lowercase: true },
       address: { type: String },
       kycDocuments: [
         {
@@ -107,7 +110,7 @@ const ProjectSchema = new mongoose.Schema(
       {
         name: { type: String },
         phone: { type: String },
-        email: { type: String },
+        email: { type: String, trim: true, lowercase: true },
         address: { type: String },
         kycDocuments: [
           {
@@ -146,13 +149,21 @@ ProjectSchema.pre('save', async function () {
   }
 });
 
-// Virtual for available plots count
+// Bookable plots: open inventory (Available) plus Canceled sites that can be re-booked
 ProjectSchema.virtual('availablePlots', {
   ref: 'Plot',
   localField: '_id',
   foreignField: 'projectId',
-  match: { status: 'Available' },
-  count: true
+  match: { status: { $in: ['Available', 'Canceled', 'Cancelled'] } },
+  count: true,
+});
+
+// Actual plot rows in inventory (may differ from totalPlots field after import)
+ProjectSchema.virtual('inventoryPlotCount', {
+  ref: 'Plot',
+  localField: '_id',
+  foreignField: 'projectId',
+  count: true,
 });
 
 module.exports = mongoose.model('Project', ProjectSchema);

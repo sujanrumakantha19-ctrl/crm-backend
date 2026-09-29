@@ -27,10 +27,12 @@ describe('Project Controller', () => {
           totalLandArea: 100,
           totalPlots: 10,
           plotSize: 200,
+          dtcpNumber: 'DTCP-999',
         });
 
       expect(res.status).toBe(201);
       expect(res.body.data.name).toBe('New Project');
+      expect(res.body.data.dtcpNumber).toBe('DTCP-999');
       expect(res.body.data.status).toBe('Upcoming');
 
       // Verify plots were auto-created
@@ -93,6 +95,26 @@ describe('Project Controller', () => {
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(200);
+      expect(res.body.data.availablePlots).toBe(1);
+      expect(res.body.data.inventoryPlotCount).toBe(2);
+    });
+
+    it('should count Canceled plots in availablePlots (re-bookable inventory)', async () => {
+      const project = await Project.create({
+        name: 'Cancel Test', location: 'Hyd', totalLandArea: 100, totalPlots: 3,
+      });
+      await Plot.create([
+        { projectId: project._id, plotNumber: '1', status: 'Available' },
+        { projectId: project._id, plotNumber: '2', status: 'Canceled' },
+        { projectId: project._id, plotNumber: '3', status: 'Booked' },
+      ]);
+
+      const res = await request(app)
+        .get(`/api/v1/projects/${project._id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.availablePlots).toBe(2);
     });
   });
 

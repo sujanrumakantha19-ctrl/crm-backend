@@ -6,13 +6,14 @@ const Project = require('../../models/Project');
 const app = buildTestApp();
 
 describe('Lead Controller', () => {
-  let adminToken, staffToken, projectId;
+  let adminToken, staffToken, staffId, projectId;
 
   beforeEach(async () => {
     const admin = await createAdminUser();
     adminToken = admin.token;
     const staff = await createTestUser();
     staffToken = staff.token;
+    staffId = staff.user._id;
     const project = await Project.create({
       name: 'Test Project', location: 'Hyderabad', totalLandArea: 100, totalPlots: 50,
     });
@@ -106,6 +107,47 @@ describe('Lead Controller', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('GET /api/v1/leads/counts', () => {
+    it('should return company-wide counts with Open/Reserved split', async () => {
+      await Lead.create([
+        { customerName: 'Unassigned Open', phone: '100', status: 'Open' },
+        { customerName: 'Assigned Open', phone: '101', status: 'Open', assignedTo: staffId },
+        { customerName: 'Qualified', phone: '102', status: 'Qualified' },
+        { customerName: 'Customer', phone: '103', status: 'Customer' },
+      ]);
+
+      const res = await request(app)
+        .get('/api/v1/leads/counts')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.All).toBe(4);
+      expect(res.body.data.Open).toBe(1);
+      expect(res.body.data.Reserved).toBe(1);
+      expect(res.body.data.Qualified).toBe(1);
+      expect(res.body.data.Customer).toBe(1);
+      expect(res.body.data.Unqualified).toBe(0);
+    });
+
+    it('should scope counts by assignedTo', async () => {
+      await Lead.create([
+        { customerName: 'Mine Open', phone: '200', status: 'Open', assignedTo: staffId },
+        { customerName: 'Mine Qual', phone: '201', status: 'Qualified', assignedTo: staffId },
+        { customerName: 'Other', phone: '202', status: 'Open' },
+      ]);
+
+      const res = await request(app)
+        .get(`/api/v1/leads/counts?assignedTo=${staffId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.All).toBe(2);
+      expect(res.body.data.Open).toBe(0);
+      expect(res.body.data.Reserved).toBe(1);
+      expect(res.body.data.Qualified).toBe(1);
     });
   });
 

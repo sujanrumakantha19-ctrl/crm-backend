@@ -15,7 +15,7 @@ const { protect, authorize } = require('../middleware/auth');
 const advancedResults = require('../middleware/advancedResults');
 const ChannelPartner = require('../models/ChannelPartner');
 const validate = require('../validators/validate');
-const { createChannelPartnerValidator } = require('../validators/channelPartnerValidators');
+const { createChannelPartnerValidator, updateChannelPartnerValidator } = require('../validators/channelPartnerValidators');
 
 // Specific routes BEFORE parameterized routes
 router.route('/active').get(protect, getActiveChannelPartners);
@@ -29,7 +29,7 @@ router
 router
   .route('/:id')
   .get(protect, getChannelPartner)
-  .put(protect, authorize('admin'), updateChannelPartner)
+  .put(protect, authorize('admin'), updateChannelPartnerValidator, validate, updateChannelPartner)
   .delete(protect, authorize('admin'), deleteChannelPartner);
 
 module.exports = router;

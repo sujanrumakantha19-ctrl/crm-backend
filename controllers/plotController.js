@@ -7,6 +7,15 @@ const User = require('../models/User');
 const Project = require('../models/Project');
 const Notification = require('../models/Notification');
 const ActivityLog = require('../models/ActivityLog');
+const {
+  findLeadForPlot,
+  linkLeadToPlot,
+  unlinkLeadFromPlot,
+  getActivePlotIdsForLead,
+  ACTIVE_PLOT_STATUSES,
+} = require('../utils/leadPlotLink');
+const { applyPlotPaymentStatusFilter } = require('../utils/plotQueryFilters');
+const { attachRelatedBookings, findCustomerBookingPlots, collapsePlotsByCustomer } = require('../utils/plotCustomerBookings');
 
 // ─── Helper: create activity log entry ─────────────────────────────────
 const logActivity = async ({ actor, actionType, action, entityType, entityId, entityName, ipAddress }) => {
@@ -34,7 +43,100 @@ const logActivity = async ({ actor, actionType, action, entityType, entityId, en
 // @route   GET /api/v1/plots
 // @access  Public
 exports.getPlots = asyncHandler(async (req, res, next) => {
-  res.status(200).json(res.advancedResults);
+  const plots = res.advancedResults.data || [];
+
+  const LEAD_SELECT =
+    '_id displayId customerName phone status paymentStatus city sourceType source assignedTo assignedToName assignedToDisplayId plotId plotIds';
+
+  const leadIds = plots
+    .map((p) => p.bookedBy?.leadId || p.pendingApproval?.leadId || p.leadId)
+    .filter(Boolean);
+
+  const plotIds = plots.map((p) => p._id).filter(Boolean);
+
+  const [plotLeads, leadsByPlotLink] = await Promise.all([
+    leadIds.length
+      ? Lead.find({ _id: { $in: Array.from(new Set(leadIds.map(String))) } }).select(LEAD_SELECT)
+      : [],
+    plotIds.length
+      ? Lead.find({
+          $or: [{ plotId: { $in: plotIds } }, { plotIds: { $in: plotIds } }],
+        }).select(LEAD_SELECT)
+      : [],
+  ]);
+
+  const leadMap = new Map(plotLeads.map((l) => [String(l._id), l]));
+  const plotIdToLead = new Map();
+  for (const lead of leadsByPlotLink) {
+    if (lead.plotId && !plotIdToLead.has(String(lead.plotId))) {
+      plotIdToLead.set(String(lead.plotId), lead);
+    }
+    for (const pid of lead.plotIds || []) {
+      const key = String(pid);
+      if (!plotIdToLead.has(key)) plotIdToLead.set(key, lead);
+    }
+  }
+
+  const toLeadInfo = (lead) =>
+    lead
+      ? {
+          _id: lead._id,
+          displayId: lead.displayId,
+          customerName: lead.customerName,
+          phone: lead.phone,
+          status: lead.status,
+          city: lead.city,
+          sourceType: lead.sourceType,
+          source: lead.source,
+          assignedTo: lead.assignedTo,
+          assignedToName: lead.assignedToName,
+          assignedToDisplayId: lead.assignedToDisplayId,
+        }
+      : null;
+
+  const enrichedPlots = plots.map((plot) => {
+    const lid = plot.bookedBy?.leadId || plot.pendingApproval?.leadId || plot.leadId;
+    let lead = lid ? leadMap.get(String(lid)) : null;
+    if (!lead) lead = plotIdToLead.get(String(plot._id));
+
+    const plotObj = plot.toObject ? plot.toObject() : { ...plot };
+
+    return {
+      ...plotObj,
+      leadInfo: toLeadInfo(lead),
+    };
+  });
+
+  const withRelated = await attachRelatedBookings(enrichedPlots);
+  const data =
+    String(req.query.groupBy || '') === 'customer'
+      ? collapsePlotsByCustomer(withRelated)
+      : withRelated;
+
+  res.status(200).json({
+    ...res.advancedResults,
+    count: data.length,
+    data,
+  });
+});
+
+// @desc    All Booked/Registered/Pending plots for one customer (lead, phone, or plot)
+// @route   GET /api/v1/plots/customer-bookings
+// @access  Private
+exports.getCustomerBookings = asyncHandler(async (req, res) => {
+  const plots = await findCustomerBookingPlots({
+    leadId: req.query.leadId,
+    leadIds: req.query.leadIds,
+    phone: req.query.phone,
+    plotId: req.query.plotId,
+    status: req.query.status,
+  });
+
+  res.status(200).json({
+    success: true,
+    count: plots.length,
+    data: plots,
+  });
 });
 
 // @desc    Get single plot
@@ -44,7 +146,7 @@ exports.getPlot = asyncHandler(async (req, res, next) => {
   const plot = await Plot.findById(req.params.id)
     .populate({
       path: 'projectId',
-      select: 'name location status',
+      select: 'name location status displayId',
     });
 
   if (!plot) {
@@ -137,6 +239,65 @@ exports.createPlot = asyncHandler(async (req, res, next) => {
   }
 });
 
+async function applyPlotRegistration(plot, { registrationDate, paymentStatus, actor, ip }) {
+  const dateStr = registrationDate || new Date().toISOString().split('T')[0];
+  plot.status = 'Registered';
+  plot.registrationDate = dateStr;
+  if (paymentStatus) {
+    plot.bookedBy = { ...(plot.bookedBy || {}), paymentStatus };
+  }
+  const actorName = actor?.name || 'Admin';
+  const actorRole = actor?.role === 'staff' ? 'Staff' : 'Admin';
+  const actorType = actor?.role === 'staff' ? 'staff' : 'admin';
+  const regTimelineEvent = {
+    id: `reg-${Date.now()}`,
+    type: 'booking_confirmed',
+    label: 'Plot Registered',
+    actor: actorName,
+    actorRole,
+    actorType,
+    date: dateStr,
+    details: `Plot registered on ${dateStr}`,
+    color: 'blue',
+  };
+  plot.timeline = [regTimelineEvent, ...(plot.timeline || [])];
+  await plot.save();
+
+  try {
+    const lead = await findLeadForPlot(plot);
+    if (lead) {
+      const leadUpdate = {
+        followUps: [
+          ...(lead.followUps || []),
+          {
+            id: `reg-${Date.now()}`,
+            date: dateStr,
+            notes: `Plot #${plot.plotNumber} registered`,
+            outcome: 'Registered',
+            nextAction: '',
+          },
+        ],
+      };
+      if (paymentStatus) leadUpdate.paymentStatus = paymentStatus;
+      await Lead.findByIdAndUpdate(lead._id, leadUpdate);
+
+      await logActivity({
+        actor,
+        actionType: 'Status Change',
+        action: `Registered Plot #${plot.plotNumber} for ${lead.customerName}`,
+        entityType: 'Plot',
+        entityId: plot._id,
+        entityName: `Plot #${plot.plotNumber}`,
+        ipAddress: ip,
+      });
+    }
+  } catch (leadErr) {
+    console.error('Failed to update lead on registration:', leadErr.message);
+  }
+
+  return plot;
+}
+
 // @desc    Update plot
 // @route   PUT /api/v1/plots/:id
 // @access  Private
@@ -174,10 +335,36 @@ exports.updatePlot = asyncHandler(async (req, res, next) => {
 
   Object.keys(allowedFields).forEach(key => allowedFields[key] === undefined && delete allowedFields[key]);
 
+  // Staff may update booking/registration fields only (same pages as admin Loans/Registrations).
+  if (req.user?.role === 'staff') {
+    delete allowedFields.plotNumber;
+    delete allowedFields.status;
+    delete allowedFields.facing;
+    delete allowedFields.size;
+    delete allowedFields.sizeUnit;
+    delete allowedFields.type;
+    delete allowedFields.price;
+    delete allowedFields.timeline;
+  }
+
+  const shouldAutoRegister =
+    plot.status === 'Booked' &&
+    typeof req.body.registrationDate === 'string' &&
+    req.body.registrationDate.trim() !== '';
+
   plot = await Plot.findByIdAndUpdate(req.params.id, allowedFields, {
     returnDocument: 'after',
     runValidators: true,
   });
+
+  if (shouldAutoRegister && plot && plot.status === 'Booked') {
+    plot = await applyPlotRegistration(plot, {
+      registrationDate: req.body.registrationDate.trim(),
+      paymentStatus: req.body.bookedBy?.paymentStatus || req.body.paymentStatus,
+      actor: req.user,
+      ip: req.ip,
+    });
+  }
 
   res.status(200).json({
     success: true,
@@ -189,9 +376,18 @@ exports.updatePlot = asyncHandler(async (req, res, next) => {
 // @route   PUT /api/v1/plots/:id/book
 // @access  Private (staff + admin)
 exports.bookPlot = asyncHandler(async (req, res, next) => {
+  if (!req.body.expectedRegistrationDate || String(req.body.expectedRegistrationDate).trim() === '') {
+    return next(new ErrorResponse('Expected Registration Date is required to book a plot', 400));
+  }
+
   const isStaffBooking = req.user.role === 'staff';
   const paymentMethod = req.body.paymentMethod || 'CASH';
-  const paymentStatus = req.body.paymentStatus || 'Not Paid';
+  let paymentStatus = req.body.paymentStatus || 'Not Paid';
+
+  // If Payment Method is LOAN and loan is not disbursed, status cannot be Fully Paid (BUG-18)
+  if (paymentMethod.toUpperCase() === 'LOAN' && paymentStatus === 'Fully Paid') {
+    paymentStatus = 'Partially Paid';
+  }
 
   const today = new Date().toISOString().split('T')[0];
   const timelineEvent = isStaffBooking
@@ -292,42 +488,20 @@ exports.bookPlot = asyncHandler(async (req, res, next) => {
       }
 
       if (lead) {
-        // Release any previously held plot (different from this one) to avoid double-booking.
-        // Registered plots are left untouched as a customer may hold multiple registered assets.
-        const prevPlotId = lead.plotId;
-        if (prevPlotId && String(prevPlotId) !== String(plot._id)) {
-          const prevPlot = await Plot.findById(prevPlotId);
-          if (prevPlot && ['Booked', 'Pending'].includes(prevPlot.status)) {
-            prevPlot.status = 'Available';
-            prevPlot.bookedBy = undefined;
-            prevPlot.pendingApproval = undefined;
-            prevPlot.registrationDate = undefined;
-            prevPlot.timeline = [
-              {
-                id: `release-${Date.now()}`,
-                type: 'booking_canceled',
-                label: 'Released',
-                actor: req.user.name || 'Admin',
-                actorRole: req.user.role || 'admin',
-                actorType: req.user.role || 'admin',
-                date: today,
-                details: `Released because customer booked Plot #${plot.plotNumber}`,
-                color: 'red',
-              },
-              ...(prevPlot.timeline || []),
-            ];
-            await prevPlot.save();
-          }
+        // Additive booking: keep sibling Booked/Pending/Registered plots.
+        if (isStaffBooking && plot.pendingApproval) {
+          plot.pendingApproval.leadId = String(lead._id);
+        } else if (plot.bookedBy) {
+          plot.bookedBy.leadId = String(lead._id);
         }
+        await plot.save();
+
+        await linkLeadToPlot(lead._id, plot._id, { setCustomer: !isStaffBooking });
 
         const leadUpdate = {
-          plotId: plot._id,
           paymentStatus,
           paymentMethod,
         };
-        if (!isStaffBooking) {
-          leadUpdate.status = 'Customer';
-        }
         if (req.body.bank) leadUpdate.bank = req.body.bank;
         if (req.body.bankFollowerName) leadUpdate.bankFollowerName = req.body.bankFollowerName;
         if (req.body.bankFollowerPhone) leadUpdate.bankFollowerPhone = req.body.bankFollowerPhone;
@@ -395,6 +569,8 @@ exports.approveBooking = asyncHandler(async (req, res, next) => {
   const isCancellation = approval.requestType === 'cancellation';
 
   if (isCancellation) {
+    const linkedLead = await findLeadForPlot(plot);
+
     plot.status = 'Canceled';
     plot.bookedBy = undefined;
     plot.pendingApproval = undefined;
@@ -424,15 +600,18 @@ exports.approveBooking = asyncHandler(async (req, res, next) => {
       ipAddress: req.ip,
     });
 
-    // Revert associated Lead if any
+    // Per-plot unlink; keep lead Customer if other active plots remain
     try {
-      const lead = await Lead.findOne({ plotId: plot._id });
-      if (lead) {
-        lead.plotId = undefined;
-        if (lead.status === 'Customer' || lead.status === 'Reserved') {
-          lead.status = 'Qualified';
+      if (linkedLead) {
+        await unlinkLeadFromPlot(linkedLead._id, plot._id);
+        const remaining = await getActivePlotIdsForLead(linkedLead._id);
+        if (remaining.length === 0) {
+          const refreshed = await Lead.findById(linkedLead._id);
+          if (refreshed && (refreshed.status === 'Customer' || refreshed.status === 'Reserved')) {
+            refreshed.status = 'Qualified';
+            await refreshed.save();
+          }
         }
-        await lead.save();
       }
     } catch (lErr) {
       console.error('Failed to revert lead on cancellation approval:', lErr.message);
@@ -478,24 +657,25 @@ exports.approveBooking = asyncHandler(async (req, res, next) => {
 
   // ─── Update the associated Lead ─────────────────────────────────────────
   try {
-    const targetLeadId = approval.leadId;
-    let lead = null;
-    if (targetLeadId && mongoose.Types.ObjectId.isValid(targetLeadId)) {
-      lead = await Lead.findById(targetLeadId);
-    }
-    if (!lead && plot._id) {
-      lead = await Lead.findOne({ plotId: plot._id });
+    let lead = await findLeadForPlot(plot);
+    if (!lead && approval.leadId && mongoose.Types.ObjectId.isValid(approval.leadId)) {
+      lead = await Lead.findById(approval.leadId);
     }
     if (!lead && approval.phone) {
       lead = await Lead.findOne({ phone: approval.phone });
     }
 
     if (lead) {
-      lead.status = 'Customer';
-      lead.plotId = plot._id;
-      lead.paymentStatus = approval.paymentStatus || 'Not Paid';
-      lead.paymentMethod = paymentMethod;
-      await lead.save();
+      if (plot.bookedBy) {
+        plot.bookedBy.leadId = String(lead._id);
+        await plot.save();
+      }
+
+      await linkLeadToPlot(lead._id, plot._id, { setCustomer: true });
+      await Lead.findByIdAndUpdate(lead._id, {
+        paymentStatus: approval.paymentStatus || 'Not Paid',
+        paymentMethod,
+      });
 
       await logActivity({
         actor: req.user,
@@ -579,6 +759,7 @@ exports.rejectBooking = asyncHandler(async (req, res, next) => {
   const targetLeadId = plot.pendingApproval?.leadId;
   const customerPhone = plot.pendingApproval?.phone;
   const requestedByUserId = plot.pendingApproval?.requestedBy;
+  const rejectLead = await findLeadForPlot(plot);
 
   plot.status = 'Available';
   plot.pendingApproval = undefined;
@@ -596,28 +777,29 @@ exports.rejectBooking = asyncHandler(async (req, res, next) => {
   plot.timeline = [rejBookingEvent, ...(plot.timeline || [])];
   await plot.save();
 
-  // ─── Revert Lead status ─────────────────────────────────────────
+  // ─── Unlink this plot only; status rules apply when no active plots remain ──
   try {
-    let lead = null;
-    if (targetLeadId && mongoose.Types.ObjectId.isValid(targetLeadId)) {
+    let lead = rejectLead;
+    if (!lead && targetLeadId && mongoose.Types.ObjectId.isValid(targetLeadId)) {
       lead = await Lead.findById(targetLeadId);
-    }
-    if (!lead && plot._id) {
-      lead = await Lead.findOne({ plotId: plot._id });
     }
     if (!lead && customerPhone) {
       lead = await Lead.findOne({ phone: customerPhone });
     }
 
     if (lead) {
-      // If already a Customer (e.g. bought in another project), retain Customer status
-      if (lead.status !== 'Customer') {
-        lead.status = 'Unqualified';
+      await unlinkLeadFromPlot(lead._id, plot._id);
+      const remaining = await getActivePlotIdsForLead(lead._id);
+      if (remaining.length === 0) {
+        const refreshed = await Lead.findById(lead._id);
+        if (refreshed) {
+          // If already a Customer (e.g. bought in another project), retain Customer status
+          if (refreshed.status !== 'Customer') {
+            refreshed.status = 'Unqualified';
+          }
+          await refreshed.save();
+        }
       }
-      if (lead.plotId && String(lead.plotId) === String(plot._id)) {
-        lead.plotId = null;
-      }
-      await lead.save();
 
       await logActivity({
         actor: req.user,
@@ -663,58 +845,12 @@ exports.registerPlot = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('Only booked plots can be registered', 400));
   }
 
-  const registrationDate = req.body.registrationDate || new Date().toISOString().split('T')[0];
-  plot.status = 'Registered';
-  plot.registrationDate = registrationDate;
-  if (req.body.paymentStatus) {
-    plot.bookedBy = { ...(plot.bookedBy || {}), paymentStatus: req.body.paymentStatus };
-  }
-  const regTimelineEvent = {
-    id: `reg-${Date.now()}`,
-    type: 'booking_confirmed',
-    label: 'Plot Registered',
-    actor: req.user.name || 'Admin',
-    actorRole: 'Admin',
-    actorType: 'admin',
-    date: registrationDate,
-    details: `Plot registered on ${registrationDate}`,
-    color: 'blue',
-  };
-  plot.timeline = [regTimelineEvent, ...(plot.timeline || [])];
-  await plot.save();
-
-  // ─── Update the associated Lead ─────────────────────────────────────────
-  try {
-    const lead = await Lead.findOne({ plotId: plot._id });
-    if (lead) {
-      const leadUpdate = {
-        paymentStatus: req.body.paymentStatus || 'Fully Paid',
-        followUps: [
-          ...(lead.followUps || []),
-          {
-            id: `reg-${Date.now()}`,
-            date: registrationDate,
-            notes: `Plot #${plot.plotNumber} registered`,
-            outcome: 'Registered',
-            nextAction: '',
-          },
-        ],
-      };
-      await Lead.findByIdAndUpdate(lead._id, leadUpdate);
-
-      await logActivity({
-        actor: req.user,
-        actionType: 'Status Change',
-        action: `Registered Plot #${plot.plotNumber} for ${lead.customerName}`,
-        entityType: 'Plot',
-        entityId: plot._id,
-        entityName: `Plot #${plot.plotNumber}`,
-        ipAddress: req.ip,
-      });
-    }
-  } catch (leadErr) {
-    console.error('Failed to update lead on registration:', leadErr.message);
-  }
+  plot = await applyPlotRegistration(plot, {
+    registrationDate: req.body.registrationDate || new Date().toISOString().split('T')[0],
+    paymentStatus: req.body.paymentStatus,
+    actor: req.user,
+    ip: req.ip,
+  });
 
   res.status(200).json({ success: true, data: plot });
 });
@@ -738,7 +874,7 @@ exports.cancelBooking = asyncHandler(async (req, res, next) => {
     plot.status = 'Pending';
     plot.pendingApproval = {
       requestType: 'cancellation',
-      leadId: plot.pendingApproval?.leadId,
+      leadId: plot.bookedBy?.leadId || plot.pendingApproval?.leadId,
       customerName: plot.bookedBy?.name || plot.pendingApproval?.customerName,
       phone: plot.bookedBy?.phone || plot.pendingApproval?.phone,
       requestedBy: String(req.user._id || req.user.id || ''),
@@ -794,6 +930,7 @@ exports.cancelBooking = asyncHandler(async (req, res, next) => {
   }
 
   // Admin direct cancellation
+  const linkedLead = await findLeadForPlot(plot);
   const prevStatus = plot.status;
   plot.status = 'Canceled';
   plot.bookedBy = undefined;
@@ -814,15 +951,18 @@ exports.cancelBooking = asyncHandler(async (req, res, next) => {
   plot.timeline = [cancelTimelineEvent, ...(plot.timeline || [])];
   await plot.save();
 
-  // Revert associated Lead if any
+  // Per-plot unlink; keep lead Customer if other active plots remain
   try {
-    const lead = await Lead.findOne({ plotId: plot._id });
-    if (lead) {
-      lead.plotId = undefined;
-      if (lead.status === 'Customer' || lead.status === 'Reserved') {
-        lead.status = 'Qualified';
+    if (linkedLead) {
+      await unlinkLeadFromPlot(linkedLead._id, plot._id);
+      const remaining = await getActivePlotIdsForLead(linkedLead._id);
+      if (remaining.length === 0) {
+        const refreshed = await Lead.findById(linkedLead._id);
+        if (refreshed && (refreshed.status === 'Customer' || refreshed.status === 'Reserved')) {
+          refreshed.status = 'Qualified';
+          await refreshed.save();
+        }
       }
-      await lead.save();
 
       await logActivity({
         actor: req.user,
@@ -872,8 +1012,13 @@ exports.deletePlot = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Plot not found with id of ${req.params.id}`, 404));
   }
 
-  // Cascade cleanup: unlink any leads pointing at this plot
-  await Lead.updateMany({ plotId: plot._id }, { $set: { plotId: null } });
+  // Cascade cleanup: unlink this plot from any leads
+  const linkedLeads = await Lead.find({
+    $or: [{ plotId: plot._id }, { plotIds: plot._id }],
+  }).select('_id');
+  for (const linked of linkedLeads) {
+    await unlinkLeadFromPlot(linked._id, plot._id);
+  }
 
   await logActivity({
     actor: req.user,
@@ -897,16 +1042,99 @@ exports.deletePlot = asyncHandler(async (req, res, next) => {
 // @route   GET /api/v1/projects/:projectId/plots
 // @access  Public
 exports.getPlotsByProject = asyncHandler(async (req, res, next) => {
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
-  const skip = (page - 1) * limit;
-  const query = { projectId: req.params.projectId };
+  const mongoose = require('mongoose');
+  let projId = req.params.projectId;
+  let projObjId = null;
+  try {
+    projObjId = new mongoose.Types.ObjectId(projId);
+  } catch (e) {
+    projObjId = null;
+  }
+
+  const query = { projectId: projObjId || projId };
+
+  if (req.query.search && String(req.query.search).trim()) {
+    query.plotNumber = { $regex: String(req.query.search).trim(), $options: 'i' };
+  }
+
+  if (req.query.status && req.query.status !== 'All' && req.query.status !== 'all') {
+    if (req.query.status === 'Cancelled' || req.query.status === 'Canceled') {
+      query.status = { $in: ['Cancelled', 'Canceled'] };
+    } else {
+      query.status = req.query.status;
+    }
+  }
+
   const total = await Plot.countDocuments(query);
-  const plots = await Plot.find(query).skip(skip).limit(limit).sort('plotNumber');
+
+  // Compute status counts and total allocated area via MongoDB aggregation
+  let stats = { Available: 0, Booked: 0, Registered: 0, Cancelled: 0, Canceled: 0, Pending: 0, total: 0 };
+  let allocatedSqFt = 0;
+  const projectMatchFilter = projObjId ? { $in: [projObjId, projId] } : projId;
+  {
+    const statsAgg = await Plot.aggregate([
+      { $match: { projectId: projectMatchFilter } },
+      { $group: { _id: '$status', count: { $sum: 1 } } }
+    ]);
+    statsAgg.forEach(s => {
+      stats[s._id] = s.count;
+      stats.total += s.count;
+    });
+
+    const sizeAgg = await Plot.aggregate([
+      { $match: { projectId: projectMatchFilter } },
+      {
+        $group: {
+          _id: null,
+          totalSqFt: {
+            $sum: {
+              $switch: {
+                branches: [
+                  { case: { $in: ['$sizeUnit', ['Sq Yards', 'SqYards', 'sq yards', 'sqyards']] }, then: { $multiply: [{ $toDouble: '$size' }, 9] } },
+                  { case: { $in: ['$sizeUnit', ['Acres', 'acres', 'Acre', 'acre']] }, then: { $multiply: [{ $toDouble: '$size' }, 43560] } },
+                  { case: { $in: ['$sizeUnit', ['Cents', 'cents', 'Cent', 'cent']] }, then: { $multiply: [{ $toDouble: '$size' }, 435.6] } },
+                ],
+                default: { $toDouble: '$size' }
+              }
+            }
+          }
+        }
+      }
+    ]);
+    allocatedSqFt = (sizeAgg[0] && sizeAgg[0].totalSqFt) || 0;
+  }
+
+  if (req.query.all === 'true') {
+    const maxAll = 10000;
+    const plots = await Plot.find(query)
+      .collation({ locale: 'en', numericOrdering: true })
+      .sort({ plotNumber: 1 })
+      .limit(maxAll);
+    return res.status(200).json({
+      success: true,
+      count: plots.length,
+      total,
+      stats,
+      allocatedSqFt,
+      data: plots,
+    });
+  }
+
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
+  const skip = (page - 1) * limit;
+  const plots = await Plot.find(query)
+    .collation({ locale: 'en', numericOrdering: true })
+    .sort({ plotNumber: 1 })
+    .skip(skip)
+    .limit(limit);
 
   res.status(200).json({
     success: true,
     count: plots.length,
+    total,
+    stats,
+    allocatedSqFt,
     pagination: {
       page,
       limit,
@@ -958,16 +1186,30 @@ exports.getMyBookings = asyncHandler(async (req, res, next) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
   const skip = (page - 1) * limit;
 
-  // Find all leads assigned to this staff that have a plotId
   const myLeads = await Lead.find({
     assignedTo: req.user.id,
-    plotId: { $exists: true, $ne: null },
-  }).select('plotId customerName phone status');
+  }).select('_id displayId plotId plotIds customerName phone status paymentStatus city sourceType source assignedTo assignedToName assignedToDisplayId');
 
-  const plotIds = myLeads.map(l => l.plotId);
+  const leadIds = myLeads.map((l) => String(l._id));
+  const leadById = new Map(myLeads.map((l) => [String(l._id), l]));
+  const legacyPlotIds = myLeads.flatMap((l) => [l.plotId, ...(l.plotIds || [])]).filter(Boolean);
 
-  // Build query
-  let query = { _id: { $in: plotIds } };
+  let query = {
+    $or: [
+      { 'bookedBy.staffId': req.user.id },
+      { 'pendingApproval.requestedBy': req.user.id }
+    ],
+    status: { $in: ACTIVE_PLOT_STATUSES },
+  };
+  
+  if (leadIds.length > 0) {
+    query.$or.push({ 'bookedBy.leadId': { $in: leadIds } });
+    query.$or.push({ 'pendingApproval.leadId': { $in: leadIds } });
+  }
+  
+  if (legacyPlotIds.length > 0) {
+    query.$or.push({ _id: { $in: legacyPlotIds } });
+  }
 
   // Optional status filter
   if (req.query.status) {
@@ -979,14 +1221,52 @@ exports.getMyBookings = asyncHandler(async (req, res, next) => {
     query.projectId = req.query.projectId;
   }
 
+  // Handle expectedRegistrationDate and registrationDate filters
+  if (req.query['expectedRegistrationDate[gte]'] || req.query['expectedRegistrationDate[lte]']) {
+    query.expectedRegistrationDate = {};
+    if (req.query['expectedRegistrationDate[gte]']) query.expectedRegistrationDate.$gte = req.query['expectedRegistrationDate[gte]'];
+    if (req.query['expectedRegistrationDate[lte]']) query.expectedRegistrationDate.$lte = req.query['expectedRegistrationDate[lte]'];
+  }
+  
+  if (req.query['registrationDate[gte]'] || req.query['registrationDate[lte]']) {
+    query.registrationDate = {};
+    if (req.query['registrationDate[gte]']) query.registrationDate.$gte = req.query['registrationDate[gte]'];
+    if (req.query['registrationDate[lte]']) query.registrationDate.$lte = req.query['registrationDate[lte]'];
+  }
+
+  if (req.query.paymentStatusFilter) {
+    applyPlotPaymentStatusFilter(query, String(req.query.paymentStatusFilter));
+  }
+
+  if (req.query.search?.trim()) {
+    const raw = req.query.search.trim();
+    const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const searchOr = [
+      { 'bookedBy.name': { $regex: escaped, $options: 'i' } },
+      { 'bookedBy.phone': { $regex: escaped, $options: 'i' } },
+    ];
+    if (req.plotLeadSearchIds?.length) {
+      searchOr.push({ 'bookedBy.leadId': { $in: req.plotLeadSearchIds } });
+      searchOr.push({ 'pendingApproval.leadId': { $in: req.plotLeadSearchIds } });
+    }
+    if (req.plotLeadSearchPlotIds?.length) {
+      searchOr.push({ _id: { $in: req.plotLeadSearchPlotIds } });
+    }
+    query.$and = query.$and || [];
+    query.$and.push({ $or: searchOr });
+  }
+
   const total = await Plot.countDocuments(query);
   const plots = await Plot.find(query)
-    .populate({ path: 'projectId', select: 'name location status' })
-    .skip(skip).limit(limit).sort('-createdAt');
+    .populate({ path: 'projectId', select: 'name location status displayId' })
+    .skip(skip).limit(limit).sort(req.query.sort || '-createdAt');
 
   // Enrich with lead info
   const enrichedPlots = plots.map(plot => {
-    const lead = myLeads.find(l => l.plotId && l.plotId.toString() === plot._id.toString());
+    const linkedId = plot.bookedBy?.leadId || plot.pendingApproval?.leadId;
+    const lead = (linkedId && leadById.get(String(linkedId)))
+      || myLeads.find(l => l.plotId && l.plotId.toString() === plot._id.toString())
+      || myLeads.find(l => (l.plotIds || []).some((id) => String(id) === String(plot._id)));
     const plotObj = plot.toJSON();
     if (!plotObj.bookedBy && lead) {
       plotObj.bookedBy = {
@@ -997,13 +1277,31 @@ exports.getMyBookings = asyncHandler(async (req, res, next) => {
     }
     return {
       ...plotObj,
-      leadInfo: lead ? { customerName: lead.customerName, phone: lead.phone, status: lead.status } : null,
+      leadInfo: lead ? { 
+        _id: lead._id,
+        displayId: lead.displayId,
+        customerName: lead.customerName, 
+        phone: lead.phone, 
+        status: lead.status,
+        city: lead.city,
+        sourceType: lead.sourceType,
+        source: lead.source,
+        assignedTo: lead.assignedTo,
+        assignedToName: lead.assignedToName,
+        assignedToDisplayId: lead.assignedToDisplayId
+      } : null,
     };
   });
 
+  const withRelated = await attachRelatedBookings(enrichedPlots);
+  const data =
+    String(req.query.groupBy || '') === 'customer'
+      ? collapsePlotsByCustomer(withRelated)
+      : withRelated;
+
   res.status(200).json({
     success: true,
-    count: enrichedPlots.length,
+    count: data.length,
     total,
     pagination: {
       page,
@@ -1011,7 +1309,7 @@ exports.getMyBookings = asyncHandler(async (req, res, next) => {
       total,
       pages: Math.ceil(total / limit),
     },
-    data: enrichedPlots,
+    data,
   });
 });
 

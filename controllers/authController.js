@@ -68,7 +68,8 @@ exports.login = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('Please provide an email and password', 400));
   }
 
-  const user = await User.findOne({ email }).select('+password');
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const user = await User.findOne({ email: normalizedEmail }).select('+password');
 
   if (!user) {
     return next(new ErrorResponse('Invalid credentials', 401));
@@ -98,6 +99,7 @@ exports.login = asyncHandler(async (req, res, next) => {
       designation: user.designation,
       phone: user.phone,
       avatarBg: user.avatarBg,
+      avatar: user.avatar || '',
       employeeId: user.employeeId,
     },
   });
@@ -125,7 +127,8 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('Please provide an email', 400));
   }
 
-  const user = await User.findOne({ email });
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const user = await User.findOne({ email: normalizedEmail });
 
   // Generic success message to prevent user enumeration
   const successMessage = 'If the email exists, a reset link has been sent.';
@@ -221,13 +224,23 @@ exports.resetPassword = asyncHandler(async (req, res, next) => {
 exports.updateProfile = asyncHandler(async (req, res, next) => {
   const { name, email, phone, dob, avatarBg, avatar } = req.body;
   const fieldsToUpdate = {};
-  if (name) fieldsToUpdate.name = name;
+  if (name !== undefined) {
+    const trimmedName = String(name).trim();
+    if (!trimmedName) {
+      return next(new ErrorResponse('Full Name cannot be empty', 400));
+    }
+    // Reject numeric-only or purely non-alphabetic names (BUG-4)
+    if (!/[a-zA-Z]/.test(trimmedName)) {
+      return next(new ErrorResponse('Full Name must contain alphabetic characters and cannot be numeric only', 400));
+    }
+    fieldsToUpdate.name = trimmedName;
+  }
   if (email) {
     const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
     if (!emailRegex.test(String(email).trim())) {
       return next(new ErrorResponse('Please provide a valid email address', 400));
     }
-    fieldsToUpdate.email = String(email).trim();
+    fieldsToUpdate.email = String(email).trim().toLowerCase();
   }
   if (phone) {
     const phoneRegex = /^(?:\+91[\-\s]?)?[6-9]\d{2}[\-\s]?\d{3}[\-\s]?\d{4}$/;
@@ -238,7 +251,21 @@ exports.updateProfile = asyncHandler(async (req, res, next) => {
     }
     fieldsToUpdate.phone = phone;
   }
-  if (dob !== undefined) fieldsToUpdate.dob = dob;
+  if (dob !== undefined && dob !== null && String(dob).trim() !== '') {
+    const dobDate = new Date(dob);
+    if (isNaN(dobDate.getTime())) {
+      return next(new ErrorResponse('Please provide a valid Date of Birth', 400));
+    }
+    const minAgeDate = new Date();
+    minAgeDate.setFullYear(minAgeDate.getFullYear() - 18);
+    minAgeDate.setHours(23, 59, 59, 999);
+    if (dobDate > minAgeDate) {
+      return next(new ErrorResponse('Date of Birth indicates age must be at least 18 years', 400));
+    }
+    fieldsToUpdate.dob = dob;
+  } else if (dob === null || dob === '') {
+    fieldsToUpdate.dob = null;
+  }
   if (avatarBg) fieldsToUpdate.avatarBg = avatarBg;
   if (avatar !== undefined) fieldsToUpdate.avatar = avatar;
 

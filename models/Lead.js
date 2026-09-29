@@ -18,6 +18,8 @@ const LeadSchema = new mongoose.Schema(
     },
     email: {
       type: String,
+      trim: true,
+      lowercase: true,
     },
     city: {
       type: String,
@@ -82,6 +84,13 @@ const LeadSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Plot',
     },
+    // All plots linked to this customer. plotId remains the primary/latest pointer.
+    plotIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Plot',
+      },
+    ],
     paymentStatus: {
       type: String,
       enum: ['Advance Paid', 'Advance Not Paid', 'Fully Paid', 'Partially Paid', 'Not Paid'],
@@ -152,6 +161,7 @@ LeadSchema.index({ assignedTo: 1 });
 LeadSchema.index({ sourceType: 1 });
 LeadSchema.index({ projectId: 1 });
 LeadSchema.index({ phone: 1 });
+LeadSchema.index({ plotIds: 1 });
 
 // Auto-generate displayId (atomic to prevent race conditions)
 LeadSchema.pre('save', async function () {

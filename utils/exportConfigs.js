@@ -1,3 +1,24 @@
+function formatDob(v) {
+  if (!v) return '';
+  if (typeof v === 'string') {
+    const trimmed = v.trim();
+    if (!trimmed) return '';
+    return trimmed.includes('T') ? trimmed.split('T')[0] : trimmed;
+  }
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return v.toISOString().split('T')[0];
+  }
+  try {
+    const d = new Date(v);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().split('T')[0];
+    }
+  } catch {
+    // fallback
+  }
+  return String(v);
+}
+
 const configs = {
   leads: {
     filename: 'leads',
@@ -19,7 +40,7 @@ const configs = {
       { key: 'budgetMin', label: 'Budget Min' },
       { key: 'budgetMax', label: 'Budget Max' },
       { key: 'gender', label: 'Gender' },
-      { key: 'dob', label: 'DOB' },
+      { key: 'dob', label: 'DOB', format: formatDob },
       { key: 'paymentStatus', label: 'Payment Status' },
       { key: 'paymentMethod', label: 'Payment Method' },
       { key: 'bank', label: 'Bank' },
@@ -114,14 +135,29 @@ const configs = {
   projects: {
     filename: 'projects',
     columns: [
-      { key: 'displayId', label: 'ID' },
+      { key: 'displayId', label: 'Project ID' },
       { key: 'name', label: 'Project Name' },
-      { key: 'location', label: 'Location' },
       { key: 'status', label: 'Status' },
-      { key: 'isEnabled', label: 'Enabled', format: (v) => (v ? 'Yes' : 'No') },
+      { key: 'category', label: 'Category' },
+      { key: 'location', label: 'Location' },
+      { key: 'district', label: 'District' },
+      { key: 'village', label: 'Village' },
+      { key: 'mandal', label: 'Mandal' },
+      { key: 'surveyNumber', label: 'Survey Number' },
+      { key: 'dtcpNumber', label: 'DTCP Number' },
+      { key: 'landType', label: 'Land Type' },
+      { key: 'totalLandArea', label: 'Total Land Area', format: (v, item) => `${v || 0} ${item.landAreaUnit || 'Acres'}` },
+      { key: 'totalPlots', label: 'Total Plots', format: (v) => String(v || 0) },
       { key: 'availablePlots', label: 'Available Plots', format: (v) => String(v || 0) },
-      { key: 'totalLandArea', label: 'Total Land Area', format: (v, item) => `${v} ${item.landAreaUnit || 'Acres'}` },
-      { key: 'totalPlots', label: 'Total Plots' },
+      { key: 'bookedPlots', label: 'Booked Plots', format: (v) => String(v || 0) },
+      { key: 'registeredPlots', label: 'Registered Plots', format: (v) => String(v || 0) },
+      { key: 'plotSize', label: 'Plot Size', format: (v, item) => v ? `${v} ${item.plotSizeUnit || ''}`.trim() : '' },
+      { key: 'pricePerSqUnit', label: 'Price Per Sq Unit', format: (v) => v !== undefined && v !== null ? String(v) : '' },
+      { key: 'owner.name', label: 'Owner Name' },
+      { key: 'owner.phone', label: 'Owner Phone' },
+      { key: 'owner.email', label: 'Owner Email' },
+      { key: 'isEnabled', label: 'Enabled', format: (v) => (v ? 'Yes' : 'No') },
+      { key: 'createdAt', label: 'Created Date', format: (v) => v ? new Date(v).toISOString().split('T')[0] : '' },
     ],
   },
 
@@ -139,6 +175,7 @@ const configs = {
       { key: 'project.village', label: 'Village' },
       { key: 'project.mandal', label: 'Mandal' },
       { key: 'project.surveyNumber', label: 'Survey Number' },
+      { key: 'project.dtcpNumber', label: 'DTCP Number' },
       { key: 'project.landType', label: 'Land Type' },
       { key: 'project.totalLandArea', label: 'Total Land Area', format: (v, item) => `${v} ${item.project?.landAreaUnit || 'Acres'}` },
       { key: 'project.totalPlots', label: 'Total Plots' },
@@ -222,7 +259,7 @@ const configs = {
       // Follow-ups
       { key: 'lead.dateAdded', label: 'Date Added', format: (v) => v ? new Date(v).toISOString().split('T')[0] : '' },
       { key: 'lead.nextFollowUpDate', label: 'Next Follow-up' },
-      { key: 'lead.dob', label: 'DOB' },
+      { key: 'lead.dob', label: 'DOB', format: formatDob },
       { key: 'lead.followUps.length', label: 'Follow-ups Count', format: (v) => String(v || 0) },
       { key: 'latestFollowUp.date', label: 'Last Follow-up Date' },
       { key: 'latestFollowUp.outcome', label: 'Last Follow-up Outcome' },
@@ -276,7 +313,7 @@ const configs = {
       { key: 'designation', label: 'Designation' },
       { key: 'phone', label: 'Phone' },
       { key: 'email', label: 'Email' },
-      { key: 'dob', label: 'DOB', format: (v) => v ? new Date(v).toISOString().split('T')[0] : '' },
+      { key: 'dob', label: 'DOB', format: formatDob },
       { key: 'groupId.name', label: 'Group' },
       { key: 'isActive', label: 'Status', format: (v) => (v ? 'Active' : 'Inactive') },
     ],

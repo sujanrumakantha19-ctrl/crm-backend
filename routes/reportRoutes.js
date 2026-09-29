@@ -9,8 +9,12 @@ const {
   getLeadsTrendReport,
   getLeadContributionReport,
   getChannelPartnerPerformanceReport,
+  getOperationsMetrics,
+  getDashboardLeadCharts,
 } = require('../controllers/reportController');
 
+router.get('/operations-metrics', protect, authorize('admin', 'staff'), getOperationsMetrics);
+router.get('/dashboard-charts', protect, authorize('admin'), getDashboardLeadCharts);
 router.get('/summary', protect, authorize('admin'), getSummary);
 router.get('/projects', protect, authorize('admin'), getProjectsReport);
 router.get('/staff', protect, authorize('admin'), getStaffReport);

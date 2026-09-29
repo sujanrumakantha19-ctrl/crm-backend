@@ -14,7 +14,7 @@ exports.getProjects = asyncHandler(async (req, res, next) => {
 // @access  Public
 exports.getProject = asyncHandler(async (req, res, next) => {
   const project = await Project.findById(req.params.id)
-    .populate('availablePlots');
+    .populate(['availablePlots', 'inventoryPlotCount']);
 
   if (!project) {
     return next(new ErrorResponse(`Project not found with id of ${req.params.id}`, 404));
@@ -38,6 +38,7 @@ exports.createProject = asyncHandler(async (req, res, next) => {
     totalLandArea: req.body.totalLandArea,
     landAreaUnit: req.body.landAreaUnit,
     surveyNumber: req.body.surveyNumber,
+    dtcpNumber: req.body.dtcpNumber,
     village: req.body.village,
     mandal: req.body.mandal,
     district: req.body.district,
@@ -58,7 +59,21 @@ exports.createProject = asyncHandler(async (req, res, next) => {
     sellers: req.body.sellers,
   };
 
+  if (allowedFields.owner && allowedFields.owner.email) {
+    allowedFields.owner.email = String(allowedFields.owner.email).trim().toLowerCase();
+  }
+  if (Array.isArray(allowedFields.sellers)) {
+    allowedFields.sellers = allowedFields.sellers.map(s => ({
+      ...s,
+      email: s.email ? String(s.email).trim().toLowerCase() : undefined,
+    }));
+  }
+
   Object.keys(allowedFields).forEach(key => allowedFields[key] === undefined && delete allowedFields[key]);
+
+  if (allowedFields.totalPlots && Number(allowedFields.totalPlots) > 5000) {
+    return next(new ErrorResponse('Total Number of Plots cannot exceed 5,000', 400));
+  }
 
   const project = await Project.create(allowedFields);
 
@@ -101,6 +116,7 @@ exports.updateProject = asyncHandler(async (req, res, next) => {
     totalLandArea: req.body.totalLandArea,
     landAreaUnit: req.body.landAreaUnit,
     surveyNumber: req.body.surveyNumber,
+    dtcpNumber: req.body.dtcpNumber,
     village: req.body.village,
     mandal: req.body.mandal,
     district: req.body.district,
@@ -121,7 +137,21 @@ exports.updateProject = asyncHandler(async (req, res, next) => {
     sellers: req.body.sellers,
   };
 
+  if (allowedFields.owner && allowedFields.owner.email) {
+    allowedFields.owner.email = String(allowedFields.owner.email).trim().toLowerCase();
+  }
+  if (Array.isArray(allowedFields.sellers)) {
+    allowedFields.sellers = allowedFields.sellers.map(s => ({
+      ...s,
+      email: s.email ? String(s.email).trim().toLowerCase() : undefined,
+    }));
+  }
+
   Object.keys(allowedFields).forEach(key => allowedFields[key] === undefined && delete allowedFields[key]);
+
+  if (allowedFields.totalPlots && Number(allowedFields.totalPlots) > 5000) {
+    return next(new ErrorResponse('Total Number of Plots cannot exceed 5,000', 400));
+  }
 
   project = await Project.findByIdAndUpdate(req.params.id, allowedFields, {
     returnDocument: 'after',

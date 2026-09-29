@@ -227,5 +227,21 @@ describe('Plot Controller Coverage', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.length).toBe(2);
     });
+
+    it('should return all plots when all=true', async () => {
+      const admin = await createAdminUser();
+      const proj = await Project.create({ name: 'BP All', location: 'L', totalLandArea: 10, totalPlots: 150 });
+      const docs = Array.from({ length: 150 }, (_, i) => ({
+        projectId: proj._id,
+        plotNumber: String(i + 1),
+      }));
+      await Plot.insertMany(docs);
+      const res = await request(app)
+        .get(`/api/v1/plots/project/${proj._id}?all=true`)
+        .set('Authorization', `Bearer ${admin.token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(150);
+      expect(res.body.data.length).toBe(150);
+    });
   });
 });

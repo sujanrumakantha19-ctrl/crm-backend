@@ -40,7 +40,9 @@ exports.getTasks = asyncHandler(async (req, res, next) => {
   }
 
   // Status & Priority filters
-  if (req.query.status && req.query.status !== 'All' && req.query.status !== 'all') {
+  if (req.query.pendingOnly === 'true' || req.query.pendingOnly === true) {
+    query.status = { $ne: 'Done' };
+  } else if (req.query.status && req.query.status !== 'All' && req.query.status !== 'all') {
     query.status = req.query.status;
   }
   if (req.query.priority && req.query.priority !== 'All' && req.query.priority !== 'all') {
