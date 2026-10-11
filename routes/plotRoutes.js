@@ -27,7 +27,7 @@ const Plot = require('../models/Plot');
 
 // Specific routes BEFORE parameterized routes
 router.route('/my-bookings').get(protect, authorize('staff'), expandPlotLeadSearch, getMyBookings);
-router.route('/customer-bookings').get(protect, getCustomerBookings);
+router.route('/customer-bookings').get(protect, expandPlotLeadSearch, getCustomerBookings);
 router.route('/pending-approvals').get(protect, authorize('admin'), getPendingApprovals);
 router.route('/status/:status').get(protect, getPlotsByStatus);
 router.route('/project/:projectId').get(protect, getPlotsByProject);
@@ -47,7 +47,7 @@ router
     'bookedBy.bank',
     'bookedBy.bankFollowerName',
     'bookedBy.bankFollowerPhone',
-    'assignedTo',
+    'bookedBy.staffDisplayId',
     'assignedToName',
   ]), getPlots)
   .post(protect, authorize('admin', 'staff'), createPlot);

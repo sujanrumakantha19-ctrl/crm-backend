@@ -602,8 +602,8 @@ exports.getFollowUps = asyncHandler(async (req, res) => {
       { assignedToName: { $regex: escapedSearch, $options: 'i' } },
     ];
 
-    // Check if query is an explicit Lead ID: "L-7", "l-7", "l 7", "l7", "L7"
-    const leadIdMatch = rawSearch.match(/^l[\s-]*(\d+)$/i);
+    // Check if query is an explicit Lead or Customer ID: "L-7", "C-7", "cust-7", "customer 7", etc.
+    const leadIdMatch = rawSearch.match(/^(?:l|c|cust|customer)[\s-]*(\d+)$/i);
     const staffIdMatch = rawSearch.match(/^(?:staff|emp)[\s-]*(\d+)$/i);
     const pureNumMatch = rawSearch.match(/^0*(\d+)$/);
 

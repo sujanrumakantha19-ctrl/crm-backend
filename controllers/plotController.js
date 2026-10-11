@@ -1244,6 +1244,8 @@ exports.getMyBookings = asyncHandler(async (req, res, next) => {
     const searchOr = [
       { 'bookedBy.name': { $regex: escaped, $options: 'i' } },
       { 'bookedBy.phone': { $regex: escaped, $options: 'i' } },
+      { 'bookedBy.staffDisplayId': { $regex: escaped, $options: 'i' } },
+      { assignedToName: { $regex: escaped, $options: 'i' } },
     ];
     if (req.plotLeadSearchIds?.length) {
       searchOr.push({ 'bookedBy.leadId': { $in: req.plotLeadSearchIds } });
@@ -1251,6 +1253,13 @@ exports.getMyBookings = asyncHandler(async (req, res, next) => {
     }
     if (req.plotLeadSearchPlotIds?.length) {
       searchOr.push({ _id: { $in: req.plotLeadSearchPlotIds } });
+    }
+    if (req.plotStaffUserIds?.length) {
+      searchOr.push({ assignedTo: { $in: req.plotStaffUserIds } });
+      searchOr.push({ 'bookedBy.staffId': { $in: req.plotStaffUserIds } });
+    }
+    if (req.plotStaffDisplayIds?.length) {
+      searchOr.push({ 'bookedBy.staffDisplayId': { $in: req.plotStaffDisplayIds } });
     }
     query.$and = query.$and || [];
     query.$and.push({ $or: searchOr });

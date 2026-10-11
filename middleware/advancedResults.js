@@ -103,36 +103,56 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
     if (req.plotLeadSearchPlotIds?.length) {
       orConditions.push({ _id: { $in: req.plotLeadSearchPlotIds } });
     }
+    if (req.plotStaffUserIds?.length) {
+      orConditions.push({ assignedTo: { $in: req.plotStaffUserIds } });
+      orConditions.push({ 'bookedBy.staffId': { $in: req.plotStaffUserIds } });
+    }
+    if (req.plotStaffDisplayIds?.length) {
+      orConditions.push({ 'bookedBy.staffDisplayId': { $in: req.plotStaffDisplayIds } });
+    }
 
     if (mongoose.Types.ObjectId.isValid(rawSearch)) {
       orConditions.push({ _id: rawSearch });
     }
 
-    // If searchFields includes displayId, enable smart ID resolution (e.g. searching "1" matches "PROJ-1")
-    if (searchFields.includes('displayId')) {
+    // Smart ID resolution for displayId, assignedToDisplayId, and bookedBy.staffDisplayId
+    const hasDisplayId = searchFields.includes('displayId');
+    const hasAssignedToDisplayId = searchFields.includes('assignedToDisplayId');
+    const hasStaffDisplayId = searchFields.includes('bookedBy.staffDisplayId');
+
+    if (hasDisplayId || hasAssignedToDisplayId || hasStaffDisplayId) {
       const numMatch = rawSearch.match(/^0*(\d+)$/);
       if (numMatch) {
         const num = parseInt(numMatch[1], 10);
-        orConditions.push({ displayId: `PROJ-${num}` });
-        orConditions.push({ displayId: `L-${num}` });
-        orConditions.push({ displayId: `CP-${num}` });
-        orConditions.push({ displayId: `STAFF-${num}` });
+        if (hasDisplayId) {
+          orConditions.push({ displayId: `PROJ-${num}` });
+          orConditions.push({ displayId: `L-${num}` });
+          orConditions.push({ displayId: `CP-${num}` });
+          orConditions.push({ displayId: `STAFF-${num}` });
+        }
+        if (hasAssignedToDisplayId) {
+          orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
+        }
+        if (hasStaffDisplayId) {
+          orConditions.push({ 'bookedBy.staffDisplayId': `STAFF-${num}` });
+        }
       }
 
       const projMatch = rawSearch.match(/^proj[\s-]*(\d+)$/i);
-      if (projMatch) {
+      if (projMatch && hasDisplayId) {
         const num = parseInt(projMatch[1], 10);
         orConditions.push({ displayId: `PROJ-${num}` });
       }
 
-      const leadMatch = rawSearch.match(/^l[\s-]*(\d+)$/i);
-      if (leadMatch) {
-        const num = parseInt(leadMatch[1], 10);
+      // Match Lead / Customer ID: "L-12", "C-12", "cust-12", "customer-12", "l 12", "c 12"
+      const leadOrCustMatch = rawSearch.match(/^(?:l|c|cust|customer)[\s-]*(\d+)$/i);
+      if (leadOrCustMatch && hasDisplayId) {
+        const num = parseInt(leadOrCustMatch[1], 10);
         orConditions.push({ displayId: `L-${num}` });
       }
 
       const cpMatch = rawSearch.match(/^cp[\s-]*(\d+)$/i);
-      if (cpMatch) {
+      if (cpMatch && hasDisplayId) {
         const num = parseInt(cpMatch[1], 10);
         orConditions.push({ displayId: `CP-${num}` });
       }
@@ -140,15 +160,34 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
       const staffMatch = rawSearch.match(/^staff[\s-]*(\d+)$/i);
       if (staffMatch) {
         const num = parseInt(staffMatch[1], 10);
-        orConditions.push({ displayId: `STAFF-${num}` });
+        if (hasDisplayId) {
+          orConditions.push({ displayId: `STAFF-${num}` });
+        }
+        if (hasAssignedToDisplayId) {
+          orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
+        }
+        if (hasStaffDisplayId) {
+          orConditions.push({ 'bookedBy.staffDisplayId': `STAFF-${num}` });
+        }
       }
 
       const empMatch = rawSearch.match(/^emp[\s-]*(\d+)$/i);
       if (empMatch) {
         const num = parseInt(empMatch[1], 10);
-        orConditions.push({ employeeId: `EMP${String(num).padStart(3, '0')}` });
-        orConditions.push({ employeeId: `EMP-${num}` });
-        orConditions.push({ employeeId: `EMP${num}` });
+        if (searchFields.includes('employeeId')) {
+          orConditions.push({ employeeId: `EMP${String(num).padStart(3, '0')}` });
+          orConditions.push({ employeeId: `EMP-${num}` });
+          orConditions.push({ employeeId: `EMP${num}` });
+        }
+        if (hasDisplayId) {
+          orConditions.push({ displayId: `STAFF-${num}` });
+        }
+        if (hasAssignedToDisplayId) {
+          orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
+        }
+        if (hasStaffDisplayId) {
+          orConditions.push({ 'bookedBy.staffDisplayId': `STAFF-${num}` });
+        }
       }
     }
 

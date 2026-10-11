@@ -19,7 +19,7 @@ router.use(protect);
 
 router
   .route('/')
-  .get(authorize('admin', 'staff', 'partner'), advancedResults(User, null, ['name', 'employeeId', 'displayId']), getUsers)
+  .get(authorize('admin', 'staff', 'partner'), advancedResults(User, null, ['name', 'email', 'phone', 'employeeId', 'displayId']), getUsers)
   .post(authorize('admin'), createUserValidator, validate, createUser);
 
 router
