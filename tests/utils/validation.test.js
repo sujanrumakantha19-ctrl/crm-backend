@@ -5,6 +5,8 @@ describe('Validation Utils', () => {
     it('should return true for valid emails', () => {
       expect(isValidEmail('test@example.com')).toBe(true);
       expect(isValidEmail('user.name@domain.co')).toBe(true);
+      expect(isValidEmail('partner+crm@samyandco.in')).toBe(true);
+      expect(isValidEmail('user+test.123@sub.example.com')).toBe(true);
     });
 
     it('should return false for invalid emails', () => {

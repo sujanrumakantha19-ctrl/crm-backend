@@ -121,7 +121,7 @@ const configs = {
     columns: [
       { key: 'title', label: 'Title' },
       { key: 'description', label: 'Description' },
-      { key: 'project.name', label: 'Project' },
+      { key: 'project', label: 'Project', format: (v, doc) => doc?.project?.name || (typeof v === 'string' && v.trim() ? v : (v?.name || 'General')) },
       { key: 'assignee.name', label: 'Assignee' },
       { key: 'priority', label: 'Priority' },
       { key: 'status', label: 'Status' },
@@ -298,7 +298,7 @@ const configs = {
       { key: 'email', label: 'Email' },
       { key: 'city', label: 'City' },
       { key: 'reraId', label: 'RERA ID' },
-      { key: 'commissionRate', label: 'Commission Rate', format: (v) => `${v}%` },
+      { key: 'commissionRate', label: 'Commission Rate', format: (v) => (v !== undefined && v !== null && v !== '' ? `${v}%` : '—') },
       { key: 'isActive', label: 'Status', format: (v) => (v ? 'Active' : 'Inactive') },
       { key: 'notes', label: 'Notes' },
     ],

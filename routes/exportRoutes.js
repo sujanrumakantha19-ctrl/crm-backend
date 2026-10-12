@@ -9,6 +9,7 @@ const {
   exportProjects,
   exportProjectDetail,
   exportCustomers,
+  exportLoans,
   exportUsers,
   exportChannelPartners,
   exportReports,
@@ -23,6 +24,7 @@ router.get('/tasks', exportTasks);
 router.get('/projects', exportProjects);
 router.get('/project-detail', exportProjectDetail);
 router.get('/customers', exportCustomers);
+router.get('/loans', exportLoans);
 router.get('/users', exportUsers);
 router.get('/channel-partners', exportChannelPartners);
 router.get('/reports', exportReports);

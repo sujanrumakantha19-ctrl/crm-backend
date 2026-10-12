@@ -100,6 +100,10 @@ exports.exportAttendance = asyncHandler(async (req, res) => {
     ];
   }
 
+  if (req.query.status && req.query.status !== 'All' && req.query.status !== 'all') {
+    filter.status = req.query.status;
+  }
+
   const query = Attendance.find(filter).sort({ date: -1 }).lean();
 
   const isModal = tab === 'details';
@@ -116,7 +120,18 @@ exports.exportAttendance = asyncHandler(async (req, res) => {
 
 exports.exportTasks = asyncHandler(async (req, res) => {
   const filter = {};
-  if (req.query.assignedTo) filter.assignee = req.query.assignedTo;
+  if (req.query.assignedTo && req.query.assignedTo !== 'all' && req.query.assignedTo !== 'All') {
+    filter.assignee = req.query.assignedTo;
+  }
+  if (req.query.project && req.query.project !== 'All') {
+    if (req.query.project === 'General') {
+      filter.$or = [{ project: null }, { project: { $exists: false } }];
+    } else {
+      filter.project = req.query.project;
+    }
+  }
+  if (req.query.dueDate) filter.dueDate = req.query.dueDate;
+  if (req.query.status && req.query.status !== 'All') filter.status = req.query.status;
 
   const cursor = Task.find(filter)
     .populate('assignee', 'name displayId')
@@ -203,9 +218,28 @@ exports.exportCustomers = asyncHandler(async (req, res) => {
   streamCSV(req, res, cursor, configs.customers.columns, configs.customers.filename);
 });
 
+exports.exportLoans = asyncHandler(async (req, res) => {
+  const filter = buildLeadExportFilter(req.query, { status: 'Customer', paymentMethod: 'LOAN' });
+
+  const cursor = Lead.find(filter)
+    .populate('projectId', 'name displayId')
+    .populate('plotId', 'plotNumber expectedRegistrationDate')
+    .lean()
+    .cursor();
+
+  streamCSV(req, res, cursor, configs.customers.columns, 'loans');
+});
+
 exports.exportUsers = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.role) filter.role = req.query.role;
+  if (req.query.isActive !== undefined && req.query.isActive !== 'all' && req.query.isActive !== 'All') {
+    filter.isActive = String(req.query.isActive) === 'true';
+  } else if (req.query.status === 'active' || req.query.status === 'Active') {
+    filter.isActive = true;
+  } else if (req.query.status === 'inactive' || req.query.status === 'Inactive') {
+    filter.isActive = false;
+  }
 
   const cursor = User.find(filter)
     .populate('groupId', 'name')
