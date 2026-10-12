@@ -319,7 +319,10 @@ function mergeCustomerPlotRows(a, b) {
   push(slimRelated(a));
   push(slimRelated(b));
   
-  const keep = (a.relatedBookingCount || 0) >= (b.relatedBookingCount || 0) ? a : b;
+  let keep = (a.relatedBookingCount || 0) >= (b.relatedBookingCount || 0) ? a : b;
+  if (a.status === 'Booked' && b.status !== 'Booked') keep = a;
+  else if (b.status === 'Booked' && a.status !== 'Booked') keep = b;
+
   return {
     ...keep,
     relatedBookings: related,

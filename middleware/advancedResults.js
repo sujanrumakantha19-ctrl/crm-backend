@@ -85,6 +85,11 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
     }
   });
 
+  // Defensive fallback: map status Open to match legacy Lead status if any
+  if (model.modelName === 'Lead' && parsedQuery.status === 'Open') {
+    parsedQuery.status = { $in: ['Open', 'Lead'] };
+  }
+
   // Search
   if (req.query.search && searchFields && searchFields.length > 0) {
     const rawSearch = req.query.search.trim();

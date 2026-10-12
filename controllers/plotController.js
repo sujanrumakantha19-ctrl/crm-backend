@@ -94,12 +94,32 @@ exports.getPlots = asyncHandler(async (req, res, next) => {
         }
       : null;
 
+  const staffUserIds = new Set();
+  plots.forEach((p) => {
+    if (p.assignedTo) staffUserIds.add(String(p.assignedTo));
+    if (p.bookedBy?.staffId) staffUserIds.add(String(p.bookedBy.staffId));
+  });
+
+  const validStaffIds = Array.from(staffUserIds).filter((id) => mongoose.Types.ObjectId.isValid(id));
+  const staffUsers = validStaffIds.length
+    ? await User.find({ _id: { $in: validStaffIds } }).select('_id name displayId').lean()
+    : [];
+  const staffUserMap = new Map(staffUsers.map((u) => [String(u._id), u]));
+
   const enrichedPlots = plots.map((plot) => {
     const lid = plot.bookedBy?.leadId || plot.pendingApproval?.leadId || plot.leadId;
     let lead = lid ? leadMap.get(String(lid)) : null;
     if (!lead) lead = plotIdToLead.get(String(plot._id));
 
     const plotObj = plot.toObject ? plot.toObject() : { ...plot };
+
+    const assignedUser = plotObj.assignedTo ? staffUserMap.get(String(plotObj.assignedTo)) : null;
+    const bookedByUser = plotObj.bookedBy?.staffId ? staffUserMap.get(String(plotObj.bookedBy.staffId)) : null;
+    const staff = assignedUser || bookedByUser;
+    if (staff) {
+      if (!plotObj.assignedToName) plotObj.assignedToName = staff.name;
+      if (!plotObj.assignedToDisplayId) plotObj.assignedToDisplayId = staff.displayId;
+    }
 
     return {
       ...plotObj,
@@ -108,10 +128,14 @@ exports.getPlots = asyncHandler(async (req, res, next) => {
   });
 
   const withRelated = await attachRelatedBookings(enrichedPlots);
-  const data =
+  let data =
     String(req.query.groupBy || '') === 'customer'
       ? collapsePlotsByCustomer(withRelated)
       : withRelated;
+
+  if (req.query.status) {
+    data = data.filter((p) => p.status === req.query.status);
+  }
 
   res.status(200).json({
     ...res.advancedResults,

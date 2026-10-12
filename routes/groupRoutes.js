@@ -4,6 +4,7 @@ const router = express.Router();
 const {
   getGroups,
   getGroup,
+  getGroupPerformance,
   createGroup,
   updateGroup,
   deleteGroup,
@@ -21,6 +22,8 @@ router
   .route('/')
   .get(advancedResults(Group, { path: 'members', select: 'name initials role' }), getGroups)
   .post(authorize('admin'), createGroup);
+
+router.get('/performance', getGroupPerformance);
 
 router
   .route('/:id')

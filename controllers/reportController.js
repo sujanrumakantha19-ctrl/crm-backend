@@ -248,7 +248,7 @@ async function buildStaffReportRows({ startDate, endDate, skip, limit }) {
             $filter: {
               input: '$leads',
               as: 'l',
-              cond: { $eq: ['$$l.status', 'Open'] },
+              cond: { $in: ['$$l.status', ['Open', 'Lead']] },
             },
           },
         },
@@ -348,7 +348,7 @@ async function buildLeadsTrendRows({ startDate, endDate, skip, limit }) {
       $group: {
         _id: '$dateStr',
         totalLeads: { $sum: 1 },
-        openLeads: { $sum: { $cond: [{ $eq: ['$status', 'Open'] }, 1, 0] } },
+        openLeads: { $sum: { $cond: [{ $in: ['$status', ['Open', 'Lead']] }, 1, 0] } },
         qualifiedLeads: { $sum: { $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0] } },
         customers: { $sum: { $cond: [{ $eq: ['$status', 'Customer'] }, 1, 0] } },
         plotsBooked: {
@@ -931,7 +931,7 @@ exports.getSummary = asyncHandler(async (req, res) => {
           _id: null,
           total: { $sum: 1 },
           customers: { $sum: { $cond: [{ $eq: ['$status', 'Customer'] }, 1, 0] } },
-          open: { $sum: { $cond: [{ $eq: ['$status', 'Open'] }, 1, 0] } },
+          open: { $sum: { $cond: [{ $in: ['$status', ['Open', 'Lead']] }, 1, 0] } },
           qualified: { $sum: { $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0] } },
           loanCustomers: {
             $sum: {

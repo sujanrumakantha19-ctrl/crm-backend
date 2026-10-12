@@ -53,12 +53,12 @@ exports.getLeadCounts = asyncHandler(async (req, res) => {
       total: { $sum: 1 },
       assigned: {
         $sum: {
-          $cond: [{ $and: [{ $eq: ['$status', 'Open'] }, { $ifNull: ['$assignedTo', false] }] }, 1, 0]
+          $cond: [{ $and: [{ $in: ['$status', ['Open', 'Lead']] }, { $ifNull: ['$assignedTo', false] }] }, 1, 0]
         }
       },
       unassigned: {
         $sum: {
-          $cond: [{ $and: [{ $eq: ['$status', 'Open'] }, { $not: [{ $ifNull: ['$assignedTo', false] }] }] }, 1, 0]
+          $cond: [{ $and: [{ $in: ['$status', ['Open', 'Lead']] }, { $not: [{ $ifNull: ['$assignedTo', false] }] }] }, 1, 0]
         }
       },
     }
@@ -70,15 +70,18 @@ exports.getLeadCounts = asyncHandler(async (req, res) => {
   let grandTotal = 0;
   counts.forEach(c => {
     grandTotal += c.total;
-    if (c._id === 'Open') {
-      result.Open = c.unassigned;
-      result.Reserved = c.assigned;
+    if (c._id === 'Open' || c._id === 'Lead') {
+      result.Open += c.unassigned;
+      result.Reserved += c.assigned;
     } else if (c._id === 'Qualified') {
-      result.Qualified = c.total;
+      result.Qualified += c.total;
     } else if (c._id === 'Unqualified') {
-      result.Unqualified = c.total;
+      result.Unqualified += c.total;
     } else if (c._id === 'Customer') {
-      result.Customer = c.total;
+      result.Customer += c.total;
+    } else {
+      result.Open += (c.unassigned || 0);
+      result.Reserved += (c.assigned || 0);
     }
   });
   result.All = grandTotal;
