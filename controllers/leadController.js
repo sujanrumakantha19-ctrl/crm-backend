@@ -36,7 +36,7 @@ exports.getLeads = asyncHandler(async (req, res, next) => {
 // @query   assignedTo, sourceId — optional ObjectId filters; omitted = company-wide (existing behavior)
 exports.getLeadCounts = asyncHandler(async (req, res) => {
   const match = {};
-  const { assignedTo, sourceId } = req.query;
+  const { assignedTo, sourceId, search } = req.query;
   if (assignedTo && mongoose.Types.ObjectId.isValid(assignedTo)) {
     match.assignedTo = new mongoose.Types.ObjectId(assignedTo);
   }
@@ -44,10 +44,61 @@ exports.getLeadCounts = asyncHandler(async (req, res) => {
     match.sourceId = new mongoose.Types.ObjectId(sourceId);
   }
 
-  const pipeline = [];
-  if (Object.keys(match).length > 0) {
-    pipeline.push({ $match: match });
+  // Handle search filter if provided (name, phone, lead id, staff id)
+  let searchFilter = null;
+  if (search && search.trim()) {
+    const rawSearch = search.trim();
+    const escapedSearch = rawSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const flexibleSearch = escapedSearch.split('').join('\\s*');
+
+    const orConditions = [
+      { customerName: { $regex: flexibleSearch, $options: 'i' } },
+      { phone: { $regex: escapedSearch, $options: 'i' } },
+      { displayId: { $regex: escapedSearch, $options: 'i' } },
+      { assignedToName: { $regex: flexibleSearch, $options: 'i' } },
+      { assignedToDisplayId: { $regex: escapedSearch, $options: 'i' } },
+    ];
+
+    if (mongoose.Types.ObjectId.isValid(rawSearch)) {
+      orConditions.push({ _id: new mongoose.Types.ObjectId(rawSearch) });
+    }
+
+    const numMatch = rawSearch.match(/^0*(\d+)$/);
+    if (numMatch) {
+      const num = parseInt(numMatch[1], 10);
+      orConditions.push({ displayId: `L-${num}` });
+      orConditions.push({ displayId: `PROJ-${num}` });
+      orConditions.push({ displayId: `STAFF-${num}` });
+      orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
+    }
+
+    const leadOrCustMatch = rawSearch.match(/^(?:l|c|cust|customer)[\s-]*(\d+)$/i);
+    if (leadOrCustMatch) {
+      const num = parseInt(leadOrCustMatch[1], 10);
+      orConditions.push({ displayId: `L-${num}` });
+    }
+
+    const staffMatch = rawSearch.match(/^(?:staff|emp)[\s-]*(\d+)$/i);
+    if (staffMatch) {
+      const num = parseInt(staffMatch[1], 10);
+      orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
+    }
+
+    searchFilter = { $or: orConditions };
   }
+
+  const pipeline = [];
+  const pipelineMatch = { ...match };
+  if (searchFilter) {
+    if (Object.keys(pipelineMatch).length > 0) {
+      pipeline.push({ $match: { $and: [pipelineMatch, searchFilter] } });
+    } else {
+      pipeline.push({ $match: searchFilter });
+    }
+  } else if (Object.keys(pipelineMatch).length > 0) {
+    pipeline.push({ $match: pipelineMatch });
+  }
+
   pipeline.push({
     $group: {
       _id: '$status',
@@ -68,10 +119,11 @@ exports.getLeadCounts = asyncHandler(async (req, res) => {
   const customerMatch = { status: 'Customer' };
   if (match.assignedTo) customerMatch.assignedTo = match.assignedTo;
   if (match.sourceId) customerMatch.sourceId = match.sourceId;
+  const finalCustomerMatch = searchFilter ? { $and: [customerMatch, searchFilter] } : customerMatch;
 
   const [counts, uniqueCustomersCount] = await Promise.all([
     Lead.aggregate(pipeline),
-    countUniqueCustomers(customerMatch),
+    countUniqueCustomers(finalCustomerMatch),
   ]);
 
   const result = { All: 0, Open: 0, Reserved: 0, Qualified: 0, Unqualified: 0, Customer: uniqueCustomersCount };
