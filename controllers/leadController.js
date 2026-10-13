@@ -23,11 +23,66 @@ const isPositiveOutcome = {
   ],
 };
 
+function collapseLeadsByCustomer(leads) {
+  if (!leads || leads.length <= 1) return leads;
+  const groups = new Map();
+
+  for (const lead of leads) {
+    const rawPhone = lead.phone ? String(lead.phone).replace(/\D/g, '').slice(-10) : '';
+    let key;
+    if (rawPhone && rawPhone !== '0000000000') {
+      key = `p:${rawPhone}`;
+    } else if (lead.displayId) {
+      key = `d:${String(lead.displayId).trim().toUpperCase()}`;
+    } else {
+      key = `n:${String(lead.customerName || '').toLowerCase().trim()}`;
+    }
+
+    const obj = lead.toObject ? lead.toObject({ virtuals: true }) : { ...lead };
+    obj.id = String(obj._id || obj.id);
+
+    if (!groups.has(key)) {
+      obj.relatedBookingCount = 1;
+      obj.relatedLeadDisplayIds = obj.displayId ? [obj.displayId] : [];
+      obj.relatedLeadIds = [obj.id];
+      groups.set(key, obj);
+    } else {
+      const existing = groups.get(key);
+      existing.relatedBookingCount = (existing.relatedBookingCount || 1) + 1;
+      if (obj.displayId && !existing.relatedLeadDisplayIds.includes(obj.displayId)) {
+        existing.relatedLeadDisplayIds.push(obj.displayId);
+      }
+      if (obj.id && !existing.relatedLeadIds.includes(obj.id)) {
+        existing.relatedLeadIds.push(obj.id);
+      }
+      if (!existing.assignedTo && obj.assignedTo) {
+        existing.assignedTo = obj.assignedTo;
+        existing.assignedToName = obj.assignedToName;
+        existing.assignedToDisplayId = obj.assignedToDisplayId;
+      }
+    }
+  }
+
+  return Array.from(groups.values());
+}
+
 // @desc    Get all leads
 // @route   GET /api/v1/leads
 // @access  Public
 exports.getLeads = asyncHandler(async (req, res, next) => {
-  res.status(200).json(res.advancedResults);
+  let data = res.advancedResults.data || [];
+  let count = res.advancedResults.count;
+
+  if (req.query.groupBy === 'customer' || (req.query.status === 'Customer' && req.query.groupBy !== 'none')) {
+    data = collapseLeadsByCustomer(data);
+    count = data.length;
+  }
+
+  res.status(200).json({
+    ...res.advancedResults,
+    count,
+    data,
+  });
 });
 
 // @desc    Get tab counts for leads in a single query
