@@ -737,6 +737,48 @@ async function buildDashboardLeadCharts() {
   return { monthlyTrend, sourceBreakdown, totalLeads: grandTotal };
 }
 
+// Count distinct customers by unique identity (valid phone, or normalized name when phone is dummy/missing)
+async function countUniqueCustomers(matchCriteria) {
+  const result = await Lead.aggregate([
+    { $match: matchCriteria },
+    {
+      $project: {
+        identityKey: {
+          $let: {
+            vars: {
+              rawPhone: { $ifNull: ['$phone', ''] },
+              rawName: { $trim: { input: { $toLower: { $ifNull: ['$customerName', ''] } } } },
+            },
+            in: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ['$$rawPhone', ''] },
+                    { $ne: ['$$rawPhone', '0000000000'] },
+                    { $ne: ['$$rawPhone', 'N/A'] },
+                    { $ne: ['$$rawPhone', '-'] },
+                  ],
+                },
+                { $concat: ['p:', '$$rawPhone'] },
+                { $concat: ['n:', '$$rawName'] },
+              ],
+            },
+          },
+        },
+      },
+    },
+    {
+      $group: {
+        _id: '$identityKey',
+      },
+    },
+    {
+      $count: 'totalUnique',
+    },
+  ]);
+  return result[0]?.totalUnique || 0;
+}
+
 async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
   const staffScope = await resolveStaffPlotScope(assignedTo);
   const dateFilter = buildPlotBookingDateFilter(startDate, endDate);
@@ -767,7 +809,7 @@ async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
   }
   const [totalLoans, totalCustomers] = await Promise.all([
     Lead.countDocuments(loanLeadMatch),
-    Lead.countDocuments(customerLeadMatch),
+    countUniqueCustomers(customerLeadMatch),
   ]);
 
   const [bookingStats] = await Plot.aggregate([
@@ -918,10 +960,16 @@ exports.getSummary = asyncHandler(async (req, res) => {
     projectMatch.createdAt = prCond;
   }
 
+  const customerLeadFilter = {
+    status: 'Customer',
+    ...(Object.keys(leadMatch).length > 0 ? leadMatch : {}),
+  };
+
   const [
     totalProjects,
     leadStats,
     bookedPlotsCount,
+    uniqueCustomersCount,
   ] = await Promise.all([
     Project.countDocuments(projectMatch),
     Lead.aggregate([
@@ -956,6 +1004,7 @@ exports.getSummary = asyncHandler(async (req, res) => {
       },
     ]),
     Plot.countDocuments({ status: { $in: ['Booked', 'Registered'] }, ...plotMatch }),
+    countUniqueCustomers(customerLeadFilter),
   ]);
 
   const stats = leadStats[0] || {
@@ -973,14 +1022,14 @@ exports.getSummary = asyncHandler(async (req, res) => {
     data: {
       totalProjects,
       totalLeads: stats.total,
-      totalCustomers: stats.customers,
+      totalCustomers: uniqueCustomersCount,
       totalPlotsBooked: Math.max(bookedPlotsCount, stats.bookedFromLeads),
       loanCustomers: stats.loanCustomers,
       cashCustomers: stats.cashCustomers,
       funnelOpen: stats.open,
       funnelQualified: stats.qualified,
-      funnelCustomer: stats.customers,
-      conversionRate: stats.total > 0 ? Math.round((stats.customers / stats.total) * 100) : 0,
+      funnelCustomer: uniqueCustomersCount,
+      conversionRate: stats.total > 0 ? Math.round((uniqueCustomersCount / stats.total) * 100) : 0,
     },
   });
 });
