@@ -6,6 +6,7 @@ const Lead = require('../models/Lead');
 const User = require('../models/User');
 const Attendance = require('../models/Attendance');
 const ChannelPartner = require('../models/ChannelPartner');
+const { countUniqueCustomers } = require('../utils/customerMetrics');
 
 // Helper to parse date filter from request query
 function getDateFilter(query) {
@@ -737,48 +738,6 @@ async function buildDashboardLeadCharts() {
   return { monthlyTrend, sourceBreakdown, totalLeads: grandTotal };
 }
 
-// Count distinct customers by unique identity (valid phone, or normalized name when phone is dummy/missing)
-async function countUniqueCustomers(matchCriteria) {
-  const result = await Lead.aggregate([
-    { $match: matchCriteria },
-    {
-      $project: {
-        identityKey: {
-          $let: {
-            vars: {
-              rawPhone: { $ifNull: ['$phone', ''] },
-              rawName: { $trim: { input: { $toLower: { $ifNull: ['$customerName', ''] } } } },
-            },
-            in: {
-              $cond: [
-                {
-                  $and: [
-                    { $ne: ['$$rawPhone', ''] },
-                    { $ne: ['$$rawPhone', '0000000000'] },
-                    { $ne: ['$$rawPhone', 'N/A'] },
-                    { $ne: ['$$rawPhone', '-'] },
-                  ],
-                },
-                { $concat: ['p:', '$$rawPhone'] },
-                { $concat: ['n:', '$$rawName'] },
-              ],
-            },
-          },
-        },
-      },
-    },
-    {
-      $group: {
-        _id: '$identityKey',
-      },
-    },
-    {
-      $count: 'totalUnique',
-    },
-  ]);
-  return result[0]?.totalUnique || 0;
-}
-
 async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
   const staffScope = await resolveStaffPlotScope(assignedTo);
   const dateFilter = buildPlotBookingDateFilter(startDate, endDate);
@@ -1017,11 +976,13 @@ exports.getSummary = asyncHandler(async (req, res) => {
     bookedFromLeads: 0,
   };
 
+  const totalLeadsCount = (stats.total - stats.customers) + uniqueCustomersCount;
+
   res.status(200).json({
     success: true,
     data: {
       totalProjects,
-      totalLeads: stats.total,
+      totalLeads: totalLeadsCount,
       totalCustomers: uniqueCustomersCount,
       totalPlotsBooked: Math.max(bookedPlotsCount, stats.bookedFromLeads),
       loanCustomers: stats.loanCustomers,
@@ -1029,7 +990,7 @@ exports.getSummary = asyncHandler(async (req, res) => {
       funnelOpen: stats.open,
       funnelQualified: stats.qualified,
       funnelCustomer: uniqueCustomersCount,
-      conversionRate: stats.total > 0 ? Math.round((uniqueCustomersCount / stats.total) * 100) : 0,
+      conversionRate: totalLeadsCount > 0 ? Math.round((uniqueCustomersCount / totalLeadsCount) * 100) : 0,
     },
   });
 });

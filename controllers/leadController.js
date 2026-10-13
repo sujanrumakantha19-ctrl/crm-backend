@@ -6,6 +6,7 @@ const Lead = require('../models/Lead');
 const User = require('../models/User');
 const Plot = require('../models/Plot');
 const ActivityLog = require('../models/ActivityLog');
+const { countUniqueCustomers } = require('../utils/customerMetrics');
 
 // Follow-up outcome classification. Negative outcomes are matched on full words
 // (word boundaries), so partial/unrelated matches (e.g. "Wrong project but
@@ -64,12 +65,17 @@ exports.getLeadCounts = asyncHandler(async (req, res) => {
     }
   });
 
-  const counts = await Lead.aggregate(pipeline);
+  const customerMatch = { status: 'Customer' };
+  if (match.assignedTo) customerMatch.assignedTo = match.assignedTo;
+  if (match.sourceId) customerMatch.sourceId = match.sourceId;
 
-  const result = { All: 0, Open: 0, Reserved: 0, Qualified: 0, Unqualified: 0, Customer: 0 };
-  let grandTotal = 0;
+  const [counts, uniqueCustomersCount] = await Promise.all([
+    Lead.aggregate(pipeline),
+    countUniqueCustomers(customerMatch),
+  ]);
+
+  const result = { All: 0, Open: 0, Reserved: 0, Qualified: 0, Unqualified: 0, Customer: uniqueCustomersCount };
   counts.forEach(c => {
-    grandTotal += c.total;
     if (c._id === 'Open' || c._id === 'Lead') {
       result.Open += c.unassigned;
       result.Reserved += c.assigned;
@@ -78,13 +84,13 @@ exports.getLeadCounts = asyncHandler(async (req, res) => {
     } else if (c._id === 'Unqualified') {
       result.Unqualified += c.total;
     } else if (c._id === 'Customer') {
-      result.Customer += c.total;
+      // Handled via uniqueCustomersCount
     } else {
       result.Open += (c.unassigned || 0);
       result.Reserved += (c.assigned || 0);
     }
   });
-  result.All = grandTotal;
+  result.All = result.Open + result.Reserved + result.Qualified + result.Unqualified + result.Customer;
 
   res.status(200).json({ success: true, data: result });
 });
