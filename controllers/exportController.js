@@ -210,6 +210,7 @@ exports.exportCustomers = asyncHandler(async (req, res) => {
   const filter = buildLeadExportFilter(req.query, { status: 'Customer' });
 
   const cursor = Lead.find(filter)
+    .populate('assignedTo', 'name displayId')
     .populate('projectId', 'name displayId')
     .populate('plotId', 'plotNumber expectedRegistrationDate')
     .lean()
@@ -222,6 +223,7 @@ exports.exportLoans = asyncHandler(async (req, res) => {
   const filter = buildLeadExportFilter(req.query, { status: 'Customer', paymentMethod: 'LOAN' });
 
   const cursor = Lead.find(filter)
+    .populate('assignedTo', 'name displayId')
     .populate('projectId', 'name displayId')
     .populate('plotId', 'plotNumber expectedRegistrationDate')
     .lean()

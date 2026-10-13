@@ -277,7 +277,16 @@ const configs = {
       { key: 'city', label: 'City' },
       { key: 'projectId.name', label: 'Project' },
       { key: 'plotId.plotNumber', label: 'Plot #' },
-      { key: 'assignedToDisplayId', label: 'Assigned To' },
+      {
+        key: 'assignedTo',
+        label: 'Assigned To',
+        format: (v, doc) => {
+          const name = doc?.assignedToName || (typeof doc?.assignedTo === 'object' ? doc?.assignedTo?.name : '') || '';
+          const id = doc?.assignedToDisplayId || (typeof doc?.assignedTo === 'object' ? doc?.assignedTo?.displayId : '') || (typeof v === 'string' && !/^[0-9a-fA-F]{24}$/.test(v) ? v : '');
+          if (name && id) return `${name} (${id})`;
+          return name || id || '—';
+        },
+      },
       { key: 'paymentMethod', label: 'Payment Method' },
       { key: 'paymentStatus', label: 'Payment Status' },
       { key: 'loanStage', label: 'Loan Stage' },
