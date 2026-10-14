@@ -136,6 +136,16 @@ const PlotSchema = new mongoose.Schema(
     registrationDate: {
       type: String,
     },
+    docNumber: {
+      type: String,
+    },
+    isQuarantined: {
+      type: Boolean,
+      default: false,
+    },
+    quarantineNotes: {
+      type: String,
+    },
   },
   {
     timestamps: true,

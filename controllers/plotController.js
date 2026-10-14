@@ -263,10 +263,13 @@ exports.createPlot = asyncHandler(async (req, res, next) => {
   }
 });
 
-async function applyPlotRegistration(plot, { registrationDate, paymentStatus, actor, ip }) {
+async function applyPlotRegistration(plot, { registrationDate, paymentStatus, docNumber, actor, ip }) {
   const dateStr = registrationDate || new Date().toISOString().split('T')[0];
   plot.status = 'Registered';
   plot.registrationDate = dateStr;
+  if (docNumber) {
+    plot.docNumber = docNumber;
+  }
   if (paymentStatus) {
     plot.bookedBy = { ...(plot.bookedBy || {}), paymentStatus };
   }
@@ -355,6 +358,9 @@ exports.updatePlot = asyncHandler(async (req, res, next) => {
     bookedBy: req.body.bookedBy,
     expectedRegistrationDate: req.body.expectedRegistrationDate,
     registrationDate: req.body.registrationDate,
+    docNumber: req.body.docNumber,
+    isQuarantined: req.body.isQuarantined,
+    quarantineNotes: req.body.quarantineNotes,
   };
 
   Object.keys(allowedFields).forEach(key => allowedFields[key] === undefined && delete allowedFields[key]);
@@ -872,6 +878,7 @@ exports.registerPlot = asyncHandler(async (req, res, next) => {
   plot = await applyPlotRegistration(plot, {
     registrationDate: req.body.registrationDate || new Date().toISOString().split('T')[0],
     paymentStatus: req.body.paymentStatus,
+    docNumber: req.body.docNumber,
     actor: req.user,
     ip: req.ip,
   });

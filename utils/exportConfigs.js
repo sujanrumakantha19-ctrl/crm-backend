@@ -264,6 +264,7 @@ const configs = {
       { key: 'latestFollowUp.date', label: 'Last Follow-up Date' },
       { key: 'latestFollowUp.outcome', label: 'Last Follow-up Outcome' },
       { key: 'latestFollowUp.notes', label: 'Last Follow-up Notes' },
+      { key: 'plot.docNumber', label: 'Document Number' },
     ],
   },
 
@@ -294,6 +295,7 @@ const configs = {
       { key: 'bankFollowerName', label: 'Follower Name' },
       { key: 'bankFollowerPhone', label: 'Follower Phone' },
       { key: 'plotId.expectedRegistrationDate', label: 'Expected Reg. Date' },
+      { key: 'plotId.docNumber', label: 'Document Number' },
     ],
   },
 
