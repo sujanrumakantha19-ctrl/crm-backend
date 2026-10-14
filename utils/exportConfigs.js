@@ -416,6 +416,14 @@ const configs = {
       { key: 'conversionRate', label: 'Conversion Rate (%)', format: (v) => `${v || 0}%` },
     ],
   },
+
+  reportOperations: {
+    filename: 'report-bookings-and-loans',
+    columns: [
+      { key: 'metric', label: 'Metric' },
+      { key: 'value', label: 'Value' },
+    ],
+  },
 };
 
 module.exports = configs;

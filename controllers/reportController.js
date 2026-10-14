@@ -6,46 +6,176 @@ const Lead = require('../models/Lead');
 const User = require('../models/User');
 const Attendance = require('../models/Attendance');
 const ChannelPartner = require('../models/ChannelPartner');
-const { countUniqueCustomers } = require('../utils/customerMetrics');
+const ErrorResponse = require('../utils/errorResponse');
+const { countUniqueCustomers, getCustomerIdentityExpression, getPlotBuyerIdentityExpression } = require('../utils/customerMetrics');
 
-// Helper to parse date filter from request query
-function getDateFilter(query) {
-  let { dateFrom, dateTo, month, year } = query;
-  let startDate = null;
-  let endDate = null;
+// Calendar validation
+function isValidCalendarDate(y, m, d) {
+  if (m < 1 || m > 12) return false;
+  if (d < 1) return false;
+  const isLeap = (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0));
+  const daysInMonth = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return d <= daysInMonth[m - 1];
+}
 
-  if (dateFrom) {
-    startDate = new Date(dateFrom);
-    startDate.setHours(0, 0, 0, 0);
+function parseAndValidateDateString(str, paramName, strict = false) {
+  if (str === undefined || str === null || str === '') return null;
+  if (typeof str !== 'string') {
+    if (strict) throw new ErrorResponse(`Invalid ${paramName} parameter`, 400);
+    return null;
   }
-  if (dateTo) {
-    endDate = new Date(dateTo);
-    endDate.setHours(23, 59, 59, 999);
+  const trimmed = str.trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) {
+    if (strict) throw new ErrorResponse(`Invalid ${paramName} date format (must be YYYY-MM-DD)`, 400);
+    const d = new Date(trimmed);
+    return isNaN(d.getTime()) ? null : { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate(), str: trimmed.slice(0, 10) };
+  }
+  const y = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const d = parseInt(match[3], 10);
+  if (y < 1900 || y > 2100) {
+    if (strict) throw new ErrorResponse(`Year for ${paramName} must be between 1900 and 2100`, 400);
+    return null;
+  }
+  if (!isValidCalendarDate(y, m, d)) {
+    if (strict) throw new ErrorResponse(`Invalid calendar date for ${paramName}: ${trimmed}`, 400);
+    return null;
+  }
+  return { y, m, d, str: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}` };
+}
+
+// Convert Asia/Kolkata (IST = UTC+5:30) date components to UTC Date
+function istStartOfDay(y, m, d) {
+  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) - 19800000);
+}
+
+function istEndOfDay(y, m, d) {
+  return new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999) - 19800000);
+}
+
+// Unified period normalizer supporting strict admin-report mode and legacy compatibility
+function normalizeReportPeriod(query = {}) {
+  const reportView = query.reportView;
+  const isStrict = reportView === 'admin';
+
+  if (reportView && reportView !== 'admin') {
+    throw new ErrorResponse(`Unknown reportView: ${reportView}`, 400);
   }
 
-  if (!dateFrom && !dateTo) {
-    if (month && year) {
-      const m = parseInt(month, 10);
-      const y = parseInt(year, 10);
-      startDate = new Date(y, m - 1, 1, 0, 0, 0, 0);
-      endDate = new Date(y, m, 0, 23, 59, 59, 999);
-    } else if (year) {
-      const y = parseInt(year, 10);
-      startDate = new Date(y, 0, 1, 0, 0, 0, 0);
-      endDate = new Date(y, 11, 31, 23, 59, 59, 999);
-    } else if (month) {
-      const now = new Date();
-      const m = parseInt(month, 10);
-      const y = now.getFullYear();
-      startDate = new Date(y, m - 1, 1, 0, 0, 0, 0);
-      endDate = new Date(y, m, 0, 23, 59, 59, 999);
+  // Reject repeated query parameters in strict mode
+  if (isStrict) {
+    if (
+      Array.isArray(query.dateFrom) ||
+      Array.isArray(query.dateTo) ||
+      Array.isArray(query.month) ||
+      Array.isArray(query.year) ||
+      Array.isArray(query.reportView)
+    ) {
+      throw new ErrorResponse('Repeated query parameters are not allowed', 400);
     }
   }
 
-  return { startDate, endDate };
+  const { dateFrom, dateTo, month, year } = query;
+
+  // Validate month syntax and range if supplied
+  let mNum = null;
+  if (month !== undefined && month !== null && month !== '') {
+    const mStr = String(month).trim();
+    if (!/^\d{1,2}$/.test(mStr)) {
+      if (isStrict) throw new ErrorResponse('Invalid month parameter (must be 1-12)', 400);
+    } else {
+      mNum = parseInt(mStr, 10);
+      if (mNum < 1 || mNum > 12) {
+        if (isStrict) throw new ErrorResponse('Invalid month parameter (must be 1-12)', 400);
+        mNum = null;
+      }
+    }
+  }
+
+  // Validate year syntax and range if supplied
+  let yNum = null;
+  if (year !== undefined && year !== null && year !== '') {
+    const yStr = String(year).trim();
+    if (!/^\d{4}$/.test(yStr)) {
+      if (isStrict) throw new ErrorResponse('Invalid year parameter (must be 4-digit year 1900-2100)', 400);
+    } else {
+      yNum = parseInt(yStr, 10);
+      if (yNum < 1900 || yNum > 2100) {
+        if (isStrict) throw new ErrorResponse('Invalid year parameter', 400);
+        yNum = null;
+      }
+    }
+  }
+
+  const parsedFrom = parseAndValidateDateString(dateFrom, 'dateFrom', isStrict);
+  const parsedTo = parseAndValidateDateString(dateTo, 'dateTo', isStrict);
+
+  if (parsedFrom && parsedTo && parsedFrom.str > parsedTo.str) {
+    if (isStrict) {
+      throw new ErrorResponse('dateFrom must be before or equal to dateTo', 400);
+    }
+  }
+
+  let startDate = null;
+  let endDate = null;
+  let startDateStr = null;
+  let endDateStr = null;
+
+  if (parsedFrom) {
+    startDateStr = parsedFrom.str;
+    startDate = istStartOfDay(parsedFrom.y, parsedFrom.m, parsedFrom.d);
+  }
+  if (parsedTo) {
+    endDateStr = parsedTo.str;
+    endDate = istEndOfDay(parsedTo.y, parsedTo.m, parsedTo.d);
+  }
+
+  if (!parsedFrom && !parsedTo) {
+    if (mNum && yNum) {
+      const isLeap = (yNum % 4 === 0 && (yNum % 100 !== 0 || yNum % 400 === 0));
+      const days = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mNum - 1];
+      startDateStr = `${yNum}-${String(mNum).padStart(2, '0')}-01`;
+      endDateStr = `${yNum}-${String(mNum).padStart(2, '0')}-${String(days).padStart(2, '0')}`;
+      startDate = istStartOfDay(yNum, mNum, 1);
+      endDate = istEndOfDay(yNum, mNum, days);
+    } else if (yNum) {
+      startDateStr = `${yNum}-01-01`;
+      endDateStr = `${yNum}-12-31`;
+      startDate = istStartOfDay(yNum, 1, 1);
+      endDate = istEndOfDay(yNum, 12, 31);
+    } else if (mNum) {
+      // Month-only resolved using current Asia/Kolkata year
+      const nowIST = new Date(Date.now() + 19800000);
+      const currentYear = nowIST.getUTCFullYear();
+      const isLeap = (currentYear % 4 === 0 && (currentYear % 100 !== 0 || currentYear % 400 === 0));
+      const days = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mNum - 1];
+      startDateStr = `${currentYear}-${String(mNum).padStart(2, '0')}-01`;
+      endDateStr = `${currentYear}-${String(mNum).padStart(2, '0')}-${String(days).padStart(2, '0')}`;
+      startDate = istStartOfDay(currentYear, mNum, 1);
+      endDate = istEndOfDay(currentYear, mNum, days);
+    }
+  }
+
+  const isFiltered = Boolean(startDateStr || endDateStr);
+
+  return {
+    startDate,
+    endDate,
+    startDateStr,
+    endDateStr,
+    isFiltered,
+    timezone: 'Asia/Kolkata',
+    reportView: reportView || null,
+  };
 }
 
-// Build Mongoose date match query for Lead (createdAt or dateAdded)
+// Backward-compatible helper to parse date filter from request query
+function getDateFilter(query) {
+  return normalizeReportPeriod(query);
+}
+
+// Build Mongoose date match query for Lead (createdAt or dateAdded) - legacy fallback
 function buildLeadDateMatch(startDate, endDate) {
   if (!startDate && !endDate) return {};
   const cond = {};
@@ -54,9 +184,69 @@ function buildLeadDateMatch(startDate, endDate) {
   return {
     $or: [
       { createdAt: cond },
-      { dateAdded: cond }
-    ]
+      { dateAdded: cond },
+    ],
   };
+}
+
+// Lead cohort match for admin reports (effective Lead Date = dateAdded when present, else createdAt)
+function buildLeadCohortMatch(startDate, endDate) {
+  if (!startDate && !endDate) return {};
+  return {
+    $expr: {
+      $let: {
+        vars: {
+          effectiveDate: { $ifNull: ['$dateAdded', '$createdAt'] },
+        },
+        in: {
+          $and: [
+            ...(startDate ? [{ $gte: ['$$effectiveDate', startDate] }] : []),
+            ...(endDate ? [{ $lte: ['$$effectiveDate', endDate] }] : []),
+          ],
+        },
+      },
+    },
+  };
+}
+
+// Pagination parameter validator
+function validatePagination(queryOrPage, maxLimitOrLimit = 50, possibleMaxLimit = 50, possibleStrict = false) {
+  let isStrict = false;
+  let pageRaw = 1;
+  let limitRaw = 12;
+  let maxLimit = 50;
+
+  if (queryOrPage && typeof queryOrPage === 'object') {
+    isStrict = queryOrPage.reportView === 'admin';
+    pageRaw = queryOrPage.page ?? 1;
+    limitRaw = queryOrPage.limit ?? 12;
+    maxLimit = typeof maxLimitOrLimit === 'number' ? maxLimitOrLimit : 50;
+  } else {
+    pageRaw = queryOrPage ?? 1;
+    limitRaw = maxLimitOrLimit ?? 12;
+    maxLimit = typeof possibleMaxLimit === 'number' ? possibleMaxLimit : 50;
+    isStrict = Boolean(possibleStrict);
+  }
+
+  const page = Number(pageRaw);
+  const limit = Number(limitRaw);
+
+  if (!Number.isInteger(page) || page < 1 || page > 1000000) {
+    if (isStrict) {
+      throw new ErrorResponse('Invalid page parameter (must be a positive integer)', 400);
+    }
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > maxLimit) {
+    if (isStrict) {
+      throw new ErrorResponse(`Invalid limit parameter (must be an integer between 1 and ${maxLimit})`, 400);
+    }
+  }
+
+  const safePage = Number.isInteger(page) && page >= 1 ? page : 1;
+  const safeLimit = Number.isInteger(limit) && limit >= 1 ? Math.min(limit, maxLimit) : 12;
+  const skip = (safePage - 1) * safeLimit;
+
+  return { page: safePage, limit: safeLimit, skip };
 }
 
 const convertToSqFt = (v, u) => {
@@ -76,11 +266,17 @@ const convertToSqFt = (v, u) => {
 // Each builder returns { total, rows }. Pagination is optional.
 // ---------------------------------------------------------------------------
 
-async function buildProjectsReportRows({ startDate, endDate, skip, limit }) {
-  const leadMatch = buildLeadDateMatch(startDate, endDate);
+async function buildProjectsReportRows({ startDate, endDate, startDateStr, endDateStr, skip, limit, reportView }) {
+  const sStr = startDateStr || (startDate ? new Date(startDate.getTime() + 19800000).toISOString().slice(0, 10) : null);
+  const eStr = endDateStr || (endDate ? new Date(endDate.getTime() + 19800000).toISOString().slice(0, 10) : null);
+  const isFiltered = Boolean(sStr || eStr || startDate || endDate);
+
+  const leadMatch = reportView === 'admin'
+    ? buildLeadCohortMatch(startDate, endDate)
+    : buildLeadDateMatch(startDate, endDate);
 
   const pipeline = [
-    { $sort: { createdAt: -1 } },
+    { $sort: { createdAt: -1, _id: 1 } },
     ...(Number.isInteger(skip) && skip > 0 ? [{ $skip: skip }] : []),
     ...(Number.isInteger(limit) && limit > 0 ? [{ $limit: limit }] : []),
     {
@@ -98,10 +294,21 @@ async function buildProjectsReportRows({ startDate, endDate, skip, limit }) {
         pipeline: [
           {
             $match: {
-              $expr: { $eq: ['$projectId', '$$projId'] },
-              ...(Object.keys(leadMatch).length > 0 ? leadMatch : {})
-            }
-          }
+              $and: [
+                { $expr: { $eq: ['$projectId', '$$projId'] } },
+                ...(Object.keys(leadMatch).length > 0 ? [leadMatch] : []),
+              ],
+            },
+          },
+          {
+            $project: {
+              status: 1,
+              paymentMethod: 1,
+              plotId: 1,
+              plotIds: 1,
+              identityKey: getCustomerIdentityExpression(),
+            },
+          },
         ],
         as: 'leads',
       },
@@ -109,6 +316,7 @@ async function buildProjectsReportRows({ startDate, endDate, skip, limit }) {
     {
       $project: {
         name: 1,
+        displayId: 1,
         location: 1,
         status: 1,
         surveyNumber: 1,
@@ -138,7 +346,7 @@ async function buildProjectsReportRows({ startDate, endDate, skip, limit }) {
             $filter: {
               input: '$plots',
               as: 'p',
-              cond: { $eq: ['$$p.status', 'Available'] },
+              cond: { $in: ['$$p.status', ['Available', 'Canceled']] },
             },
           },
         },
@@ -151,34 +359,208 @@ async function buildProjectsReportRows({ startDate, endDate, skip, limit }) {
             in: { size: '$$p.size', sizeUnit: '$$p.sizeUnit' },
           },
         },
-        leadCount: { $size: '$leads' },
+        leadCount: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $add: [
+                {
+                  $size: {
+                    $filter: {
+                      input: '$leads',
+                      as: 'l',
+                      cond: { $ne: ['$$l.status', 'Customer'] },
+                    },
+                  },
+                },
+                {
+                  $size: {
+                    $setUnion: [
+                      {
+                        $map: {
+                          input: {
+                            $filter: {
+                              input: '$leads',
+                              as: 'l',
+                              cond: { $eq: ['$$l.status', 'Customer'] },
+                            },
+                          },
+                          as: 'c',
+                          in: '$$c.identityKey',
+                        },
+                      },
+                      [],
+                    ],
+                  },
+                },
+              ],
+            },
+            { $size: '$leads' },
+          ],
+        },
         loanBookings: {
-          $size: {
-            $filter: {
-              input: '$leads',
-              as: 'l',
-              cond: {
-                $and: [
-                  { $eq: ['$$l.status', 'Customer'] },
-                  { $eq: ['$$l.paymentMethod', 'LOAN'] },
-                ],
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $filter: {
+                  input: '$plots',
+                  as: 'p',
+                  cond: {
+                    $and: [
+                      { $in: ['$$p.status', ['Booked', 'Registered']] },
+                      {
+                        $or: [
+                          { $eq: [{ $ifNull: ['$$p.bookedBy.paymentMethod', ''] }, 'LOAN'] },
+                          { $eq: [{ $ifNull: ['$$p.paymentMethod', ''] }, 'LOAN'] },
+                        ],
+                      },
+                      {
+                        $cond: [
+                          { $eq: [isFiltered, true] },
+                          {
+                            $cond: [
+                              {
+                                $gt: [
+                                  {
+                                    $size: {
+                                      $filter: {
+                                        input: '$leads',
+                                        as: 'l',
+                                        cond: {
+                                          $and: [
+                                            { $eq: ['$$l.status', 'Customer'] },
+                                            {
+                                              $or: [
+                                                { $eq: [{ $toString: '$$l._id' }, { $ifNull: ['$$p.bookedBy.leadId', ''] }] },
+                                                { $eq: ['$$l.plotId', '$$p._id'] },
+                                                { $in: ['$$p._id', { $ifNull: ['$$l.plotIds', []] }] },
+                                              ],
+                                            },
+                                          ],
+                                        },
+                                      },
+                                    },
+                                  },
+                                  0,
+                                ],
+                              },
+                              true,
+                              {
+                                $and: [
+                                  { $eq: [{ $ifNull: ['$$p.bookedBy.leadId', ''] }, ''] },
+                                  { $ne: [{ $ifNull: ['$$p.bookedBy.bookedAt', ''] }, ''] },
+                                  ...(sStr ? [{ $gte: [{ $substrCP: [{ $toString: '$$p.bookedBy.bookedAt' }, 0, 10] }, sStr] }] : []),
+                                  ...(eStr ? [{ $lte: [{ $substrCP: [{ $toString: '$$p.bookedBy.bookedAt' }, 0, 10] }, eStr] }] : []),
+                                ],
+                              },
+                            ],
+                          },
+                          true,
+                        ],
+                      },
+                    ],
+                  },
+                },
               },
             },
-          },
+            {
+              $size: {
+                $filter: {
+                  input: '$leads',
+                  as: 'l',
+                  cond: {
+                    $and: [
+                      { $eq: ['$$l.status', 'Customer'] },
+                      { $eq: ['$$l.paymentMethod', 'LOAN'] },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
         },
         cashBookings: {
-          $size: {
-            $filter: {
-              input: '$leads',
-              as: 'l',
-              cond: {
-                $and: [
-                  { $eq: ['$$l.status', 'Customer'] },
-                  { $eq: ['$$l.paymentMethod', 'CASH'] },
-                ],
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $filter: {
+                  input: '$plots',
+                  as: 'p',
+                  cond: {
+                    $and: [
+                      { $in: ['$$p.status', ['Booked', 'Registered']] },
+                      {
+                        $or: [
+                          { $eq: [{ $ifNull: ['$$p.bookedBy.paymentMethod', ''] }, 'CASH'] },
+                          { $eq: [{ $ifNull: ['$$p.paymentMethod', ''] }, 'CASH'] },
+                        ],
+                      },
+                      {
+                        $cond: [
+                          { $eq: [isFiltered, true] },
+                          {
+                            $cond: [
+                              {
+                                $gt: [
+                                  {
+                                    $size: {
+                                      $filter: {
+                                        input: '$leads',
+                                        as: 'l',
+                                        cond: {
+                                          $and: [
+                                            { $eq: ['$$l.status', 'Customer'] },
+                                            {
+                                              $or: [
+                                                { $eq: [{ $toString: '$$l._id' }, { $ifNull: ['$$p.bookedBy.leadId', ''] }] },
+                                                { $eq: ['$$l.plotId', '$$p._id'] },
+                                                { $in: ['$$p._id', { $ifNull: ['$$l.plotIds', []] }] },
+                                              ],
+                                            },
+                                          ],
+                                        },
+                                      },
+                                    },
+                                  },
+                                  0,
+                                ],
+                              },
+                              true,
+                              {
+                                $and: [
+                                  { $eq: [{ $ifNull: ['$$p.bookedBy.leadId', ''] }, ''] },
+                                  { $ne: [{ $ifNull: ['$$p.bookedBy.bookedAt', ''] }, ''] },
+                                  ...(sStr ? [{ $gte: [{ $substrCP: [{ $toString: '$$p.bookedBy.bookedAt' }, 0, 10] }, sStr] }] : []),
+                                  ...(eStr ? [{ $lte: [{ $substrCP: [{ $toString: '$$p.bookedBy.bookedAt' }, 0, 10] }, eStr] }] : []),
+                                ],
+                              },
+                            ],
+                          },
+                          true,
+                        ],
+                      },
+                    ],
+                  },
+                },
               },
             },
-          },
+            {
+              $size: {
+                $filter: {
+                  input: '$leads',
+                  as: 'l',
+                  cond: {
+                    $and: [
+                      { $eq: ['$$l.status', 'Customer'] },
+                      { $eq: ['$$l.paymentMethod', 'CASH'] },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
         },
       },
     },
@@ -203,12 +585,14 @@ async function buildProjectsReportRows({ startDate, endDate, skip, limit }) {
   return { total, rows: formattedStats };
 }
 
-async function buildStaffReportRows({ startDate, endDate, skip, limit }) {
-  const leadMatch = buildLeadDateMatch(startDate, endDate);
+async function buildStaffReportRows({ startDate, endDate, skip, limit, reportView }) {
+  const leadMatch = reportView === 'admin'
+    ? buildLeadCohortMatch(startDate, endDate)
+    : buildLeadDateMatch(startDate, endDate);
 
   const pipeline = [
     { $match: { role: 'staff' } },
-    { $sort: { name: 1 } },
+    { $sort: { name: 1, _id: 1 } },
     ...(Number.isInteger(skip) && skip > 0 ? [{ $skip: skip }] : []),
     ...(Number.isInteger(limit) && limit > 0 ? [{ $limit: limit }] : []),
     {
@@ -218,8 +602,17 @@ async function buildStaffReportRows({ startDate, endDate, skip, limit }) {
         pipeline: [
           {
             $match: {
-              $expr: { $eq: ['$assignedTo', '$$staffId'] },
-              ...(Object.keys(leadMatch).length > 0 ? leadMatch : {})
+              $and: [
+                { $expr: { $eq: ['$assignedTo', '$$staffId'] } },
+                ...(Object.keys(leadMatch).length > 0 ? [leadMatch] : []),
+              ],
+            },
+          },
+          {
+            $project: {
+              status: 1,
+              paymentMethod: 1,
+              identityKey: getCustomerIdentityExpression(),
             }
           }
         ],
@@ -234,15 +627,78 @@ async function buildStaffReportRows({ startDate, endDate, skip, limit }) {
         phone: 1,
         email: 1,
         avatarBg: 1,
-        assignedLeads: { $size: '$leads' },
-        converted: {
-          $size: {
-            $filter: {
-              input: '$leads',
-              as: 'l',
-              cond: { $eq: ['$$l.status', 'Customer'] },
+        assignedLeads: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $add: [
+                {
+                  $size: {
+                    $filter: {
+                      input: '$leads',
+                      as: 'l',
+                      cond: { $ne: ['$$l.status', 'Customer'] },
+                    },
+                  },
+                },
+                {
+                  $size: {
+                    $setUnion: [
+                      {
+                        $map: {
+                          input: {
+                            $filter: {
+                              input: '$leads',
+                              as: 'l',
+                              cond: { $eq: ['$$l.status', 'Customer'] },
+                            },
+                          },
+                          as: 'c',
+                          in: '$$c.identityKey',
+                        },
+                      },
+                      [],
+                    ],
+                  },
+                },
+              ],
             },
-          },
+            { $size: '$leads' },
+          ],
+        },
+        converted: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $setUnion: [
+                  {
+                    $map: {
+                      input: {
+                        $filter: {
+                          input: '$leads',
+                          as: 'l',
+                          cond: { $eq: ['$$l.status', 'Customer'] },
+                        },
+                      },
+                      as: 'c',
+                      in: '$$c.identityKey',
+                    },
+                  },
+                  [],
+                ],
+              },
+            },
+            {
+              $size: {
+                $filter: {
+                  input: '$leads',
+                  as: 'l',
+                  cond: { $eq: ['$$l.status', 'Customer'] },
+                },
+              },
+            },
+          ],
         },
         open: {
           $size: {
@@ -254,32 +710,92 @@ async function buildStaffReportRows({ startDate, endDate, skip, limit }) {
           },
         },
         loanConversions: {
-          $size: {
-            $filter: {
-              input: '$leads',
-              as: 'l',
-              cond: {
-                $and: [
-                  { $eq: ['$$l.status', 'Customer'] },
-                  { $eq: ['$$l.paymentMethod', 'LOAN'] },
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $setUnion: [
+                  {
+                    $map: {
+                      input: {
+                        $filter: {
+                          input: '$leads',
+                          as: 'l',
+                          cond: {
+                            $and: [
+                              { $eq: ['$$l.status', 'Customer'] },
+                              { $eq: ['$$l.paymentMethod', 'LOAN'] },
+                            ],
+                          },
+                        },
+                      },
+                      as: 'c',
+                      in: '$$c.identityKey',
+                    },
+                  },
+                  [],
                 ],
               },
             },
-          },
+            {
+              $size: {
+                $filter: {
+                  input: '$leads',
+                  as: 'l',
+                  cond: {
+                    $and: [
+                      { $eq: ['$$l.status', 'Customer'] },
+                      { $eq: ['$$l.paymentMethod', 'LOAN'] },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
         },
         cashConversions: {
-          $size: {
-            $filter: {
-              input: '$leads',
-              as: 'l',
-              cond: {
-                $and: [
-                  { $eq: ['$$l.status', 'Customer'] },
-                  { $eq: ['$$l.paymentMethod', 'CASH'] },
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $setUnion: [
+                  {
+                    $map: {
+                      input: {
+                        $filter: {
+                          input: '$leads',
+                          as: 'l',
+                          cond: {
+                            $and: [
+                              { $eq: ['$$l.status', 'Customer'] },
+                              { $eq: ['$$l.paymentMethod', 'CASH'] },
+                            ],
+                          },
+                        },
+                      },
+                      as: 'c',
+                      in: '$$c.identityKey',
+                    },
+                  },
+                  [],
                 ],
               },
             },
-          },
+            {
+              $size: {
+                $filter: {
+                  input: '$leads',
+                  as: 'l',
+                  cond: {
+                    $and: [
+                      { $eq: ['$$l.status', 'Customer'] },
+                      { $eq: ['$$l.paymentMethod', 'CASH'] },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
         },
       },
     },
@@ -293,16 +809,19 @@ async function buildStaffReportRows({ startDate, endDate, skip, limit }) {
   return { total, rows };
 }
 
-async function buildAttendanceReportRows({ startDate, endDate, skip, limit }) {
+async function buildAttendanceReportRows({ startDate, endDate, startDateStr, endDateStr, skip, limit }) {
   const query = {};
-  if (startDate || endDate) {
+  const startStr = startDateStr || (startDate ? new Date(startDate.getTime() + 19800000).toISOString().slice(0, 10) : null);
+  const endStr = endDateStr || (endDate ? new Date(endDate.getTime() + 19800000).toISOString().slice(0, 10) : null);
+
+  if (startStr || endStr) {
     const dateCond = {};
-    if (startDate) dateCond.$gte = startDate.toISOString().slice(0, 10);
-    if (endDate) dateCond.$lte = endDate.toISOString().slice(0, 10);
+    if (startStr) dateCond.$gte = startStr;
+    if (endStr) dateCond.$lte = endStr;
     query.date = dateCond;
   }
 
-  const base = Attendance.find(query).sort('-date -createdAt');
+  const base = Attendance.find(query).sort('-date -createdAt _id');
   const [total, rows] = await Promise.all([
     Attendance.countDocuments(query),
     Number.isInteger(skip) && Number.isInteger(limit) && (skip > 0 || limit > 0)
@@ -327,8 +846,10 @@ function formatTrendRow(item) {
   };
 }
 
-async function buildLeadsTrendRows({ startDate, endDate, skip, limit }) {
-  const leadMatch = buildLeadDateMatch(startDate, endDate);
+async function buildLeadsTrendRows({ startDate, endDate, skip, limit, reportView }) {
+  const leadMatch = reportView === 'admin'
+    ? buildLeadCohortMatch(startDate, endDate)
+    : buildLeadDateMatch(startDate, endDate);
 
   const pipeline = [
     ...(Object.keys(leadMatch).length > 0 ? [{ $match: leadMatch }] : []),
@@ -337,22 +858,70 @@ async function buildLeadsTrendRows({ startDate, endDate, skip, limit }) {
         dateStr: {
           $dateToString: {
             format: '%Y-%m-%d',
-            date: { $ifNull: ['$createdAt', '$dateAdded'] },
+            date: { $ifNull: ['$dateAdded', '$createdAt'] },
+            timezone: '+05:30',
           },
         },
         status: 1,
         plotId: 1,
+        plotIds: 1,
         paymentMethod: 1,
+        identityKey: getCustomerIdentityExpression(),
+        plots: {
+          $cond: [
+            { $eq: ['$status', 'Customer'] },
+            {
+              $setUnion: [
+                { $ifNull: ['$plotIds', []] },
+                { $cond: [{ $gt: ['$plotId', null] }, ['$plotId'], []] },
+              ],
+            },
+            [],
+          ],
+        },
+        loanPlots: {
+          $cond: [
+            { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'LOAN'] }] },
+            {
+              $setUnion: [
+                { $ifNull: ['$plotIds', []] },
+                { $cond: [{ $gt: ['$plotId', null] }, ['$plotId'], []] },
+              ],
+            },
+            [],
+          ],
+        },
+        cashPlots: {
+          $cond: [
+            { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'CASH'] }] },
+            {
+              $setUnion: [
+                { $ifNull: ['$plotIds', []] },
+                { $cond: [{ $gt: ['$plotId', null] }, ['$plotId'], []] },
+              ],
+            },
+            [],
+          ],
+        },
       },
     },
     {
       $group: {
         _id: '$dateStr',
-        totalLeads: { $sum: 1 },
+        rawTotalLeads: { $sum: 1 },
+        nonCustomerLeads: { $sum: { $cond: [{ $ne: ['$status', 'Customer'] }, 1, 0] } },
         openLeads: { $sum: { $cond: [{ $in: ['$status', ['Open', 'Lead']] }, 1, 0] } },
         qualifiedLeads: { $sum: { $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0] } },
-        customers: { $sum: { $cond: [{ $eq: ['$status', 'Customer'] }, 1, 0] } },
-        plotsBooked: {
+        customerLeads: { $sum: { $cond: [{ $eq: ['$status', 'Customer'] }, 1, 0] } },
+        customerIdentities: {
+          $addToSet: {
+            $cond: [{ $eq: ['$status', 'Customer'] }, '$identityKey', '$$REMOVE'],
+          },
+        },
+        allPlotArrays: { $push: '$plots' },
+        allLoanPlotArrays: { $push: '$loanPlots' },
+        allCashPlotArrays: { $push: '$cashPlots' },
+        legacyPlotsBooked: {
           $sum: {
             $cond: [
               { $and: [{ $eq: ['$status', 'Customer'] }, { $gt: ['$plotId', null] }] },
@@ -361,7 +930,7 @@ async function buildLeadsTrendRows({ startDate, endDate, skip, limit }) {
             ],
           },
         },
-        loanBookings: {
+        legacyLoanBookings: {
           $sum: {
             $cond: [
               { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'LOAN'] }] },
@@ -370,7 +939,7 @@ async function buildLeadsTrendRows({ startDate, endDate, skip, limit }) {
             ],
           },
         },
-        cashBookings: {
+        legacyCashBookings: {
           $sum: {
             $cond: [
               { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'CASH'] }] },
@@ -378,6 +947,72 @@ async function buildLeadsTrendRows({ startDate, endDate, skip, limit }) {
               0,
             ],
           },
+        },
+      },
+    },
+    {
+      $project: {
+        _id: 1,
+        totalLeads: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            { $add: ['$nonCustomerLeads', { $size: '$customerIdentities' }] },
+            '$rawTotalLeads',
+          ],
+        },
+        openLeads: 1,
+        qualifiedLeads: 1,
+        customers: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            { $size: '$customerIdentities' },
+            '$customerLeads',
+          ],
+        },
+        plotsBooked: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $reduce: {
+                  input: '$allPlotArrays',
+                  initialValue: [],
+                  in: { $setUnion: ['$$value', '$$this'] },
+                },
+              },
+            },
+            '$legacyPlotsBooked',
+          ],
+        },
+        loanBookings: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $reduce: {
+                  input: '$allLoanPlotArrays',
+                  initialValue: [],
+                  in: { $setUnion: ['$$value', '$$this'] },
+                },
+              },
+            },
+            '$legacyLoanBookings',
+          ],
+        },
+        cashBookings: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $reduce: {
+                  input: '$allCashPlotArrays',
+                  initialValue: [],
+                  in: { $setUnion: ['$$value', '$$this'] },
+                },
+              },
+            },
+            '$legacyCashBookings',
+          ],
         },
       },
     },
@@ -414,17 +1049,86 @@ function formatContributionRow(item, grandTotalLeads) {
   };
 }
 
-async function buildLeadContributionRows({ startDate, endDate, skip, limit }) {
-  const leadMatch = buildLeadDateMatch(startDate, endDate);
+async function buildLeadContributionRows({ startDate, endDate, skip, limit, reportView }) {
+  const leadMatch = reportView === 'admin'
+    ? buildLeadCohortMatch(startDate, endDate)
+    : buildLeadDateMatch(startDate, endDate);
 
   const pipeline = [
     ...(Object.keys(leadMatch).length > 0 ? [{ $match: leadMatch }] : []),
     {
+      $project: {
+        sourceType: {
+          $let: {
+            vars: { raw: { $trim: { input: { $ifNull: ['$sourceType', ''] } } } },
+            in: {
+              $cond: [
+                { $or: [{ $eq: ['$$raw', ''] }, { $eq: ['$$raw', 'null'] }] },
+                'Direct / Other',
+                '$$raw',
+              ],
+            },
+          },
+        },
+        status: 1,
+        paymentMethod: 1,
+        plotId: 1,
+        plotIds: 1,
+        identityKey: getCustomerIdentityExpression(),
+        plots: {
+          $cond: [
+            { $eq: ['$status', 'Customer'] },
+            {
+              $setUnion: [
+                { $ifNull: ['$plotIds', []] },
+                { $cond: [{ $gt: ['$plotId', null] }, ['$plotId'], []] },
+              ],
+            },
+            [],
+          ],
+        },
+        loanPlots: {
+          $cond: [
+            { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'LOAN'] }] },
+            {
+              $setUnion: [
+                { $ifNull: ['$plotIds', []] },
+                { $cond: [{ $gt: ['$plotId', null] }, ['$plotId'], []] },
+              ],
+            },
+            [],
+          ],
+        },
+        cashPlots: {
+          $cond: [
+            { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'CASH'] }] },
+            {
+              $setUnion: [
+                { $ifNull: ['$plotIds', []] },
+                { $cond: [{ $gt: ['$plotId', null] }, ['$plotId'], []] },
+              ],
+            },
+            [],
+          ],
+        },
+        dateAdded: { $ifNull: ['$dateAdded', '$createdAt'] },
+      },
+    },
+    {
       $group: {
-        _id: { $ifNull: ['$sourceType', 'Direct / Other'] },
-        totalLeads: { $sum: 1 },
-        converted: { $sum: { $cond: [{ $eq: ['$status', 'Customer'] }, 1, 0] } },
-        plotsBooked: {
+        _id: '$sourceType',
+        rawTotalLeads: { $sum: 1 },
+        nonCustomerLeads: { $sum: { $cond: [{ $ne: ['$status', 'Customer'] }, 1, 0] } },
+        customerLeads: { $sum: { $cond: [{ $eq: ['$status', 'Customer'] }, 1, 0] } },
+        customerIdentities: {
+          $addToSet: {
+            $cond: [{ $eq: ['$status', 'Customer'] }, '$identityKey', '$$REMOVE'],
+          },
+        },
+        allPlotArrays: { $push: '$plots' },
+        allLoanPlotArrays: { $push: '$loanPlots' },
+        allCashPlotArrays: { $push: '$cashPlots' },
+        legacyPlotsBooked: {
           $sum: {
             $cond: [
               { $and: [{ $eq: ['$status', 'Customer'] }, { $gt: ['$plotId', null] }] },
@@ -433,7 +1137,7 @@ async function buildLeadContributionRows({ startDate, endDate, skip, limit }) {
             ],
           },
         },
-        loanBookings: {
+        legacyLoanBookings: {
           $sum: {
             $cond: [
               { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'LOAN'] }] },
@@ -442,7 +1146,7 @@ async function buildLeadContributionRows({ startDate, endDate, skip, limit }) {
             ],
           },
         },
-        cashBookings: {
+        legacyCashBookings: {
           $sum: {
             $cond: [
               { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'CASH'] }] },
@@ -451,10 +1155,75 @@ async function buildLeadContributionRows({ startDate, endDate, skip, limit }) {
             ],
           },
         },
-        latestLeadDate: { $max: { $ifNull: ['$createdAt', '$dateAdded'] } },
+        latestLeadDate: { $max: '$dateAdded' },
       },
     },
-    { $sort: { totalLeads: -1 } },
+    {
+      $project: {
+        _id: 1,
+        totalLeads: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            { $add: ['$nonCustomerLeads', { $size: '$customerIdentities' }] },
+            '$rawTotalLeads',
+          ],
+        },
+        converted: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            { $size: '$customerIdentities' },
+            '$customerLeads',
+          ],
+        },
+        plotsBooked: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $reduce: {
+                  input: '$allPlotArrays',
+                  initialValue: [],
+                  in: { $setUnion: ['$$value', '$$this'] },
+                },
+              },
+            },
+            '$legacyPlotsBooked',
+          ],
+        },
+        loanBookings: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $reduce: {
+                  input: '$allLoanPlotArrays',
+                  initialValue: [],
+                  in: { $setUnion: ['$$value', '$$this'] },
+                },
+              },
+            },
+            '$legacyLoanBookings',
+          ],
+        },
+        cashBookings: {
+          $cond: [
+            { $eq: [reportView, 'admin'] },
+            {
+              $size: {
+                $reduce: {
+                  input: '$allCashPlotArrays',
+                  initialValue: [],
+                  in: { $setUnion: ['$$value', '$$this'] },
+                },
+              },
+            },
+            '$legacyCashBookings',
+          ],
+        },
+        latestLeadDate: 1,
+      },
+    },
+    { $sort: { totalLeads: -1, _id: 1 } },
   ];
 
   const totalRes = await Lead.aggregate([
@@ -479,16 +1248,12 @@ async function buildLeadContributionRows({ startDate, endDate, skip, limit }) {
   return { total, rows: data.map(item => formatContributionRow(item, grandTotalLeads)) };
 }
 
-async function buildChannelPartnerPerformanceRows({ startDate, endDate }) {
-  // Get all channel partners
+async function buildChannelPartnerPerformanceRows({ startDate, endDate, startDateStr, endDateStr, skip, limit, reportView } = {}) {
   const allPartners = await ChannelPartner.find({}).lean();
+  const leadDateMatch = reportView === 'admin'
+    ? buildLeadCohortMatch(startDate, endDate)
+    : buildLeadDateMatch(startDate, endDate);
 
-  // Build lead match for date filter
-  const leadDateMatch = buildLeadDateMatch(startDate, endDate);
-
-  // Aggregate leads by partner. Newer leads carry sourceId (the partner's user
-  // id) so renamed/colliding names do not conflate stats; legacy leads (no
-  // sourceId) fall back to the source name.
   const leadsByPartner = await Lead.aggregate([
     {
       $match: {
@@ -497,19 +1262,75 @@ async function buildChannelPartnerPerformanceRows({ startDate, endDate }) {
       },
     },
     {
+      $project: {
+        sourceId: 1,
+        source: { $trim: { input: { $ifNull: ['$source', ''] } } },
+        status: 1,
+        paymentMethod: 1,
+        plotId: 1,
+        plotIds: 1,
+        identityKey: getCustomerIdentityExpression(),
+        plots: {
+          $cond: [
+            { $eq: ['$status', 'Customer'] },
+            {
+              $setUnion: [
+                { $ifNull: ['$plotIds', []] },
+                { $cond: [{ $gt: ['$plotId', null] }, ['$plotId'], []] },
+              ],
+            },
+            [],
+          ],
+        },
+        loanPlots: {
+          $cond: [
+            { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'LOAN'] }] },
+            {
+              $setUnion: [
+                { $ifNull: ['$plotIds', []] },
+                { $cond: [{ $gt: ['$plotId', null] }, ['$plotId'], []] },
+              ],
+            },
+            [],
+          ],
+        },
+        cashPlots: {
+          $cond: [
+            { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'CASH'] }] },
+            {
+              $setUnion: [
+                { $ifNull: ['$plotIds', []] },
+                { $cond: [{ $gt: ['$plotId', null] }, ['$plotId'], []] },
+              ],
+            },
+            [],
+          ],
+        },
+      },
+    },
+    {
       $group: {
         _id: {
           sourceId: '$sourceId',
-          source: { $ifNull: ['$source', 'Unknown'] },
+          source: '$source',
         },
-        totalLeads: { $sum: 1 },
-        converted: {
+        rawTotalLeads: { $sum: 1 },
+        nonCustomerLeads: { $sum: { $cond: [{ $ne: ['$status', 'Customer'] }, 1, 0] } },
+        customerLeads: {
           $sum: { $cond: [{ $eq: ['$status', 'Customer'] }, 1, 0] },
         },
-        plotsBooked: {
+        customerIdentities: {
+          $addToSet: {
+            $cond: [{ $eq: ['$status', 'Customer'] }, '$identityKey', '$$REMOVE'],
+          },
+        },
+        allPlotArrays: { $push: '$plots' },
+        allLoanPlotArrays: { $push: '$loanPlots' },
+        allCashPlotArrays: { $push: '$cashPlots' },
+        legacyPlotsBooked: {
           $sum: { $cond: [{ $ifNull: ['$plotId', false] }, 1, 0] },
         },
-        loanBookings: {
+        legacyLoanBookings: {
           $sum: {
             $cond: [
               { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'LOAN'] }] },
@@ -518,7 +1339,7 @@ async function buildChannelPartnerPerformanceRows({ startDate, endDate }) {
             ],
           },
         },
-        cashBookings: {
+        legacyCashBookings: {
           $sum: {
             $cond: [
               { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'CASH'] }] },
@@ -531,48 +1352,252 @@ async function buildChannelPartnerPerformanceRows({ startDate, endDate }) {
     },
   ]);
 
-  // Map leads by sourceId (partner user id) primarily, then by name as fallback.
-  const leadsMap = new Map();
-  leadsByPartner.forEach(l => {
-    const idKey = l._id.sourceId ? `id:${String(l._id.sourceId)}` : null;
-    const nameKey = `name:${l._id.source}`;
-    if (idKey) leadsMap.set(idKey, l);
-    leadsMap.set(nameKey, l);
-  });
-
-  // Merge partner info with lead stats
-  const merged = allPartners.map(cp => {
-    const idKey = cp.userId ? `id:${String(cp.userId)}` : null;
-    const leadsInfo = (idKey && leadsMap.get(idKey)) || leadsMap.get(`name:${cp.name}`) || {};
-    const totalLeads = leadsInfo.totalLeads || 0;
-    const converted = leadsInfo.converted || 0;
-    return {
+  const partnerStatsMap = new Map();
+  allPartners.forEach((cp) => {
+    partnerStatsMap.set(String(cp._id), {
       _id: cp._id,
       name: cp.name,
       phone: cp.phone || '-',
       company: cp.companyName || '-',
+      totalLeads: 0,
+      rawTotalLeads: 0,
+      nonCustomerLeads: 0,
+      converted: 0,
+      customerIdentities: new Set(),
+      plotIdsSet: new Set(),
+      loanPlotsSet: new Set(),
+      cashPlotsSet: new Set(),
+      plotsBooked: 0,
+      loanBookings: 0,
+      cashBookings: 0,
+    });
+  });
+
+  const partnerIdLookup = new Map();
+  const partnerNameLookup = new Map();
+  const partnerNameCounts = new Map();
+  allPartners.forEach((cp) => {
+    partnerIdLookup.set(String(cp._id), String(cp._id));
+    if (cp.userId) partnerIdLookup.set(String(cp.userId), String(cp._id));
+    if (cp.name) {
+      const norm = cp.name.trim().toLowerCase();
+      partnerNameLookup.set(norm, String(cp._id));
+      partnerNameCounts.set(norm, (partnerNameCounts.get(norm) || 0) + 1);
+    }
+  });
+
+  const unattributed = {
+    _id: 'unattributed',
+    name: 'Unattributed partner activity',
+    phone: '-',
+    company: '-',
+    totalLeads: 0,
+    rawTotalLeads: 0,
+    nonCustomerLeads: 0,
+    converted: 0,
+    customerIdentities: new Set(),
+    plotIdsSet: new Set(),
+    loanPlotsSet: new Set(),
+    cashPlotsSet: new Set(),
+    plotsBooked: 0,
+    loanBookings: 0,
+    cashBookings: 0,
+  };
+
+  leadsByPartner.forEach((group) => {
+    const rawSourceId = group._id.sourceId ? String(group._id.sourceId) : null;
+    const rawSourceName = group._id.source ? group._id.source.trim().toLowerCase() : null;
+
+    let matchedPartnerId = null;
+    if (rawSourceId) {
+      if (partnerIdLookup.has(rawSourceId)) {
+        matchedPartnerId = partnerIdLookup.get(rawSourceId);
+      }
+      // If explicit sourceId is unmatched, it MUST remain unattributed (do not guess by name)
+    } else if (rawSourceName && partnerNameLookup.has(rawSourceName)) {
+      // Only attribute by name if exactly one partner profile has this name
+      if (partnerNameCounts.get(rawSourceName) === 1) {
+        matchedPartnerId = partnerNameLookup.get(rawSourceName);
+      }
+    }
+
+    const target = matchedPartnerId ? partnerStatsMap.get(matchedPartnerId) : unattributed;
+    if (target) {
+      target.rawTotalLeads += group.rawTotalLeads;
+      target.nonCustomerLeads += group.nonCustomerLeads;
+      target.plotsBooked += group.legacyPlotsBooked;
+      target.loanBookings += group.legacyLoanBookings;
+      target.cashBookings += group.legacyCashBookings;
+      target.converted += group.customerLeads;
+      (group.customerIdentities || []).forEach((idKey) => target.customerIdentities.add(idKey));
+      (group.allPlotArrays || []).forEach((arr) => {
+        (arr || []).forEach((pId) => target.plotIdsSet.add(String(pId)));
+      });
+      (group.allLoanPlotArrays || []).forEach((arr) => {
+        (arr || []).forEach((pId) => target.loanPlotsSet.add(String(pId)));
+      });
+      (group.allCashPlotArrays || []).forEach((arr) => {
+        (arr || []).forEach((pId) => target.cashPlotsSet.add(String(pId)));
+      });
+    }
+  });
+
+  const merged = Array.from(partnerStatsMap.values()).map((p) => {
+    const totalLeads = reportView === 'admin'
+      ? p.nonCustomerLeads + p.customerIdentities.size
+      : p.rawTotalLeads;
+    const converted = reportView === 'admin' ? p.customerIdentities.size : p.converted;
+    const plotsBooked = reportView === 'admin' ? p.plotIdsSet.size : p.plotsBooked;
+    const loanBookings = reportView === 'admin' ? p.loanPlotsSet.size : p.loanBookings;
+    const cashBookings = reportView === 'admin' ? p.cashPlotsSet.size : p.cashBookings;
+    return {
+      _id: p._id,
+      name: p.name,
+      phone: p.phone,
+      company: p.company,
       totalLeads,
       converted,
-      plotsBooked: leadsInfo.plotsBooked || 0,
-      loanBookings: leadsInfo.loanBookings || 0,
-      cashBookings: leadsInfo.cashBookings || 0,
+      plotsBooked,
+      loanBookings,
+      cashBookings,
       conversionRate: totalLeads > 0 ? Math.round((converted / totalLeads) * 100) : 0,
     };
   });
 
-  // Sort by totalLeads descending
-  merged.sort((a, b) => b.totalLeads - a.totalLeads);
+  if (unattributed.rawTotalLeads > 0) {
+    const totalLeads = reportView === 'admin'
+      ? unattributed.nonCustomerLeads + unattributed.customerIdentities.size
+      : unattributed.rawTotalLeads;
+    const converted = reportView === 'admin' ? unattributed.customerIdentities.size : unattributed.converted;
+    const plotsBooked = reportView === 'admin' ? unattributed.plotIdsSet.size : unattributed.plotsBooked;
+    const loanBookings = reportView === 'admin' ? unattributed.loanPlotsSet.size : unattributed.loanBookings;
+    const cashBookings = reportView === 'admin' ? unattributed.cashPlotsSet.size : unattributed.cashBookings;
+    merged.push({
+      _id: unattributed._id,
+      name: unattributed.name,
+      phone: unattributed.phone,
+      company: unattributed.company,
+      totalLeads,
+      converted,
+      plotsBooked,
+      loanBookings,
+      cashBookings,
+      conversionRate: totalLeads > 0 ? Math.round((converted / totalLeads) * 100) : 0,
+    });
+  }
 
-  return { total: merged.length, rows: merged };
+  merged.sort((a, b) => {
+    if (b.totalLeads !== a.totalLeads) return b.totalLeads - a.totalLeads;
+    const nameA = a.name || '';
+    const nameB = b.name || '';
+    if (nameA.localeCompare(nameB) !== 0) return nameA.localeCompare(nameB);
+    return String(a._id).localeCompare(String(b._id));
+  });
+
+  const paginatedRows = Number.isInteger(skip) && Number.isInteger(limit) && (skip > 0 || limit > 0)
+    ? merged.slice(skip, skip + limit)
+    : merged;
+
+  return { total: merged.length, rows: paginatedRows };
 }
 
-// Build plot booking-date filter (bookedBy.bookedAt string, fallback updatedAt for legacy rows)
-function buildPlotBookingDateFilter(startDate, endDate) {
-  if (!startDate && !endDate) return null;
+// Build plot booking-date filter (bookedBy.bookedAt string, fallback timeline for admin, fallback updatedAt for legacy)
+function buildPlotBookingDateFilter(arg1, arg2, arg3) {
+  let startDate = null;
+  let endDate = null;
+  let startDateStr = null;
+  let endDateStr = null;
+  let reportView = null;
+
+  if (arg1 && typeof arg1 === 'object' && !(arg1 instanceof Date)) {
+    startDate = arg1.startDate;
+    endDate = arg1.endDate;
+    startDateStr = arg1.startDateStr;
+    endDateStr = arg1.endDateStr;
+    reportView = arg1.reportView;
+  } else {
+    startDate = arg1;
+    endDate = arg2;
+    reportView = arg3;
+  }
+
+  const isStrict = reportView === 'admin';
+  const sStr = startDateStr || (startDate ? new Date(startDate.getTime() + 19800000).toISOString().slice(0, 10) : null);
+  const eStr = endDateStr || (endDate ? new Date(endDate.getTime() + 19800000).toISOString().slice(0, 10) : null);
+
+  if (!sStr && !eStr && !startDate && !endDate) return null;
 
   const bookedAtRange = {};
-  if (startDate) bookedAtRange.$gte = startDate.toISOString().slice(0, 10);
-  if (endDate) bookedAtRange.$lte = endDate.toISOString().slice(0, 10);
+  if (sStr) bookedAtRange.$gte = sStr;
+  if (eStr) bookedAtRange.$lte = eStr;
+
+  if (isStrict) {
+    return {
+      $expr: {
+        $let: {
+          vars: {
+            rawBookedAt: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: [{ $ifNull: ['$bookedBy.bookedAt', ''] }, ''] },
+                  ],
+                },
+                '$bookedBy.bookedAt',
+                {
+                  $max: {
+                    $map: {
+                      input: {
+                        $filter: {
+                          input: { $ifNull: ['$timeline', []] },
+                          as: 't',
+                          cond: {
+                            $and: [
+                              { $in: ['$$t.type', ['booking_confirmed', 'new_booking']] },
+                              { $ne: ['$$t.label', 'Cancellation Rejected'] },
+                              { $ne: ['$$t.date', null] },
+                              { $ne: ['$$t.date', ''] },
+                            ],
+                          },
+                        },
+                      },
+                      as: 'vt',
+                      in: '$$vt.date',
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          in: {
+            $let: {
+              vars: {
+                effectiveBookedDate: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $ne: ['$$rawBookedAt', null] },
+                        { $ne: ['$$rawBookedAt', ''] },
+                      ],
+                    },
+                    { $substrCP: [{ $toString: '$$rawBookedAt' }, 0, 10] },
+                    null,
+                  ],
+                },
+              },
+              in: {
+                $and: [
+                  { $ne: ['$$effectiveBookedDate', null] },
+                  ...(sStr ? [{ $gte: ['$$effectiveBookedDate', sStr] }] : []),
+                  ...(eStr ? [{ $lte: ['$$effectiveBookedDate', eStr] }] : []),
+                ],
+              },
+            },
+          },
+        },
+      },
+    };
+  }
 
   const updatedAtRange = {};
   if (startDate) updatedAtRange.$gte = startDate;
@@ -738,9 +1763,10 @@ async function buildDashboardLeadCharts() {
   return { monthlyTrend, sourceBreakdown, totalLeads: grandTotal };
 }
 
-async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
+async function buildOperationsMetrics(params = {}) {
+  const { startDate, endDate, startDateStr, endDateStr, assignedTo, reportView } = params;
   const staffScope = await resolveStaffPlotScope(assignedTo);
-  const dateFilter = buildPlotBookingDateFilter(startDate, endDate);
+  const dateFilter = buildPlotBookingDateFilter({ startDate, endDate, startDateStr, endDateStr, reportView });
 
   const bookingBase = mergeMatchClauses(
     {
@@ -760,16 +1786,52 @@ async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
     dateFilter,
   );
 
-  const loanLeadMatch = { status: 'Customer', paymentMethod: 'LOAN' };
-  const customerLeadMatch = { status: 'Customer' };
-  if (assignedTo && mongoose.Types.ObjectId.isValid(assignedTo)) {
-    loanLeadMatch.assignedTo = new mongoose.Types.ObjectId(assignedTo);
-    customerLeadMatch.assignedTo = new mongoose.Types.ObjectId(assignedTo);
+  let totalLoans = 0;
+  let totalCustomers = 0;
+
+  if (reportView === 'admin') {
+    const buyerAgg = await Plot.aggregate([
+      { $match: bookingBase },
+      {
+        $project: {
+          paymentMethod: '$bookedBy.paymentMethod',
+          identityKey: getPlotBuyerIdentityExpression(),
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          customers: { $addToSet: '$identityKey' },
+          loanCustomers: {
+            $addToSet: {
+              $cond: [{ $eq: ['$paymentMethod', 'LOAN'] }, '$identityKey', '$$REMOVE'],
+            },
+          },
+        },
+      },
+    ]);
+    totalCustomers = buyerAgg[0]?.customers?.length || 0;
+    totalLoans = buyerAgg[0]?.loanCustomers?.length || 0;
+  } else {
+    const leadDateMatch = buildLeadDateMatch(startDate, endDate);
+    const loanLeadMatch = {
+      status: 'Customer',
+      paymentMethod: 'LOAN',
+      ...(Object.keys(leadDateMatch).length > 0 ? leadDateMatch : {}),
+    };
+    const customerLeadMatch = {
+      status: 'Customer',
+      ...(Object.keys(leadDateMatch).length > 0 ? leadDateMatch : {}),
+    };
+    if (assignedTo && mongoose.Types.ObjectId.isValid(assignedTo)) {
+      loanLeadMatch.assignedTo = new mongoose.Types.ObjectId(assignedTo);
+      customerLeadMatch.assignedTo = new mongoose.Types.ObjectId(assignedTo);
+    }
+    [totalLoans, totalCustomers] = await Promise.all([
+      Lead.countDocuments(loanLeadMatch),
+      countUniqueCustomers(customerLeadMatch),
+    ]);
   }
-  const [totalLoans, totalCustomers] = await Promise.all([
-    Lead.countDocuments(loanLeadMatch),
-    countUniqueCustomers(customerLeadMatch),
-  ]);
 
   const [bookingStats] = await Plot.aggregate([
     { $match: bookingBase },
@@ -795,6 +1857,11 @@ async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
         advanceNotPaid: {
           $sum: {
             $cond: [{ $eq: ['$bookedBy.paymentStatus', 'Advance Not Paid'] }, 1, 0],
+          },
+        },
+        fullyPaid: {
+          $sum: {
+            $cond: [{ $eq: ['$bookedBy.paymentStatus', 'Fully Paid'] }, 1, 0],
           },
         },
       },
@@ -833,6 +1900,7 @@ async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
       },
     },
     staffScope,
+    dateFilter,
   );
 
   const [[todaysRegStats], [pendingPaymentStats]] = await Promise.all([
@@ -846,6 +1914,58 @@ async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
     ]),
   ]);
 
+  let unknownBookingDateCount = 0;
+  if (reportView === 'admin' && (startDate || endDate || startDateStr || endDateStr)) {
+    const unknownBase = mergeMatchClauses(
+      {
+        status: { $in: ['Booked', 'Registered'] },
+        bookedBy: { $exists: true, $ne: null },
+        $expr: {
+          $let: {
+            vars: {
+              rawBookedAt: {
+                $cond: [
+                  { $and: [{ $ne: [{ $ifNull: ['$bookedBy.bookedAt', ''] }, ''] }] },
+                  '$bookedBy.bookedAt',
+                  {
+                    $max: {
+                      $map: {
+                        input: {
+                          $filter: {
+                            input: { $ifNull: ['$timeline', []] },
+                            as: 't',
+                            cond: {
+                              $and: [
+                                { $in: ['$$t.type', ['booking_confirmed', 'new_booking']] },
+                                { $ne: ['$$t.label', 'Cancellation Rejected'] },
+                                { $ne: ['$$t.date', null] },
+                                { $ne: ['$$t.date', ''] },
+                              ],
+                            },
+                          },
+                        },
+                        as: 'vt',
+                        in: '$$vt.date',
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            in: {
+              $or: [
+                { $eq: ['$$rawBookedAt', null] },
+                { $eq: ['$$rawBookedAt', ''] },
+              ],
+            },
+          },
+        },
+      },
+      staffScope,
+    );
+    unknownBookingDateCount = await Plot.countDocuments(unknownBase);
+  }
+
   return {
     totalLoans,
     totalCustomers,
@@ -853,11 +1973,13 @@ async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
     totalBookings: bookingStats?.totalBookings || 0,
     todaysRegistrations: todaysRegStats?.count || 0,
     pendingPaymentRegistrations: pendingPaymentStats?.count || 0,
+    unknownBookingDateCount,
     bookingPayments: {
       notPaid: bookingStats?.notPaid || 0,
       partiallyPaid: bookingStats?.partiallyPaid || 0,
       advancePaid: bookingStats?.advancePaid || 0,
       advanceNotPaid: bookingStats?.advanceNotPaid || 0,
+      fullyPaid: bookingStats?.fullyPaid || 0,
     },
   };
 }
@@ -866,16 +1988,26 @@ async function buildOperationsMetrics({ startDate, endDate, assignedTo }) {
 // @route   GET /api/v1/reports/operations-metrics
 // @access  Private/Admin + Staff (staff auto-scoped to assigned bookings)
 exports.getOperationsMetrics = asyncHandler(async (req, res) => {
-  const { startDate, endDate } = getDateFilter(req.query);
+  const { startDate, endDate, startDateStr, endDateStr } = getDateFilter(req.query);
 
   let assignedTo = null;
   if (req.user.role === 'staff') {
+    if (req.query.reportView === 'admin') {
+      throw new ErrorResponse('Staff users cannot access admin report view', 403);
+    }
     assignedTo = String(req.user.id || req.user._id);
   } else if (req.query.assignedTo) {
     assignedTo = String(req.query.assignedTo);
   }
 
-  const data = await buildOperationsMetrics({ startDate, endDate, assignedTo });
+  const data = await buildOperationsMetrics({
+    startDate,
+    endDate,
+    startDateStr,
+    endDateStr,
+    assignedTo,
+    reportView: req.query.reportView,
+  });
 
   res.status(200).json({
     success: true,
@@ -899,30 +2031,33 @@ exports.getDashboardLeadCharts = asyncHandler(async (req, res) => {
 // @route   GET /api/v1/reports/summary
 // @access  Private/Admin
 exports.getSummary = asyncHandler(async (req, res) => {
-  const { startDate, endDate } = getDateFilter(req.query);
+  const { startDate, endDate, startDateStr, endDateStr } = getDateFilter(req.query);
+  const isStrict = req.query.reportView === 'admin';
 
-  const leadMatch = buildLeadDateMatch(startDate, endDate);
+  const leadMatch = isStrict
+    ? buildLeadCohortMatch(startDate, endDate)
+    : buildLeadDateMatch(startDate, endDate);
 
-  const plotMatch = {};
-  if (startDate || endDate) {
-    const pCond = {};
-    if (startDate) pCond.$gte = startDate;
-    if (endDate) pCond.$lte = endDate;
-    plotMatch.updatedAt = pCond;
-  }
-
-  const projectMatch = {};
-  if (startDate || endDate) {
-    const prCond = {};
-    if (startDate) prCond.$gte = startDate;
-    if (endDate) prCond.$lte = endDate;
-    projectMatch.createdAt = prCond;
-  }
+  const plotDateFilter = buildPlotBookingDateFilter({
+    startDate,
+    endDate,
+    startDateStr,
+    endDateStr,
+    reportView: req.query.reportView,
+  });
 
   const customerLeadFilter = {
     status: 'Customer',
     ...(Object.keys(leadMatch).length > 0 ? leadMatch : {}),
   };
+
+  const bookingBase = mergeMatchClauses(
+    {
+      status: { $in: ['Booked', 'Registered'] },
+      bookedBy: { $exists: true, $ne: null },
+    },
+    plotDateFilter,
+  );
 
   const [
     totalProjects,
@@ -930,7 +2065,7 @@ exports.getSummary = asyncHandler(async (req, res) => {
     bookedPlotsCount,
     uniqueCustomersCount,
   ] = await Promise.all([
-    Project.countDocuments(projectMatch),
+    Project.countDocuments({}),
     Lead.aggregate([
       ...(Object.keys(leadMatch).length > 0 ? [{ $match: leadMatch }] : []),
       {
@@ -945,9 +2080,27 @@ exports.getSummary = asyncHandler(async (req, res) => {
               $cond: [{ $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'LOAN'] }] }, 1, 0],
             },
           },
+          loanCustomerIdentities: {
+            $addToSet: {
+              $cond: [
+                { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'LOAN'] }] },
+                getCustomerIdentityExpression(),
+                '$$REMOVE',
+              ],
+            },
+          },
           cashCustomers: {
             $sum: {
               $cond: [{ $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'CASH'] }] }, 1, 0],
+            },
+          },
+          cashCustomerIdentities: {
+            $addToSet: {
+              $cond: [
+                { $and: [{ $eq: ['$status', 'Customer'] }, { $eq: ['$paymentMethod', 'CASH'] }] },
+                getCustomerIdentityExpression(),
+                '$$REMOVE',
+              ],
             },
           },
           bookedFromLeads: {
@@ -962,7 +2115,7 @@ exports.getSummary = asyncHandler(async (req, res) => {
         },
       },
     ]),
-    Plot.countDocuments({ status: { $in: ['Booked', 'Registered'] }, ...plotMatch }),
+    Plot.countDocuments(bookingBase),
     countUniqueCustomers(customerLeadFilter),
   ]);
 
@@ -974,6 +2127,8 @@ exports.getSummary = asyncHandler(async (req, res) => {
     loanCustomers: 0,
     cashCustomers: 0,
     bookedFromLeads: 0,
+    loanCustomerIdentities: [],
+    cashCustomerIdentities: [],
   };
 
   const totalLeadsCount = (stats.total - stats.customers) + uniqueCustomersCount;
@@ -984,9 +2139,9 @@ exports.getSummary = asyncHandler(async (req, res) => {
       totalProjects,
       totalLeads: totalLeadsCount,
       totalCustomers: uniqueCustomersCount,
-      totalPlotsBooked: Math.max(bookedPlotsCount, stats.bookedFromLeads),
-      loanCustomers: stats.loanCustomers,
-      cashCustomers: stats.cashCustomers,
+      totalPlotsBooked: isStrict ? bookedPlotsCount : Math.max(bookedPlotsCount, stats.bookedFromLeads),
+      loanCustomers: isStrict ? (stats.loanCustomerIdentities?.length || 0) : stats.loanCustomers,
+      cashCustomers: isStrict ? (stats.cashCustomerIdentities?.length || 0) : stats.cashCustomers,
       funnelOpen: stats.open,
       funnelQualified: stats.qualified,
       funnelCustomer: uniqueCustomersCount,
@@ -999,18 +2154,24 @@ exports.getSummary = asyncHandler(async (req, res) => {
 // @route   GET /api/v1/reports/projects?page=1&limit=12&month=...&year=...&dateFrom=...&dateTo=...
 // @access  Private/Admin
 exports.getProjectsReport = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = Math.min(parseInt(req.query.limit, 10) || 12, 50);
-  const skip = (page - 1) * limit;
-  const { startDate, endDate } = getDateFilter(req.query);
+  const { page, limit, skip } = validatePagination(req.query, 50);
+  const { startDate, endDate, startDateStr, endDateStr } = getDateFilter(req.query);
 
-  const { total, rows } = await buildProjectsReportRows({ startDate, endDate, skip, limit });
+  const { total, rows } = await buildProjectsReportRows({
+    startDate,
+    endDate,
+    startDateStr,
+    endDateStr,
+    skip,
+    limit,
+    reportView: req.query.reportView,
+  });
 
   res.status(200).json({
     success: true,
     total,
     page,
-    pages: Math.ceil(total / limit),
+    pages: Math.ceil(total / limit) || 1,
     data: rows,
   });
 });
@@ -1019,18 +2180,24 @@ exports.getProjectsReport = asyncHandler(async (req, res) => {
 // @route   GET /api/v1/reports/staff?page=1&limit=12&month=...&year=...&dateFrom=...&dateTo=...
 // @access  Private/Admin
 exports.getStaffReport = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = Math.min(parseInt(req.query.limit, 10) || 12, 50);
-  const skip = (page - 1) * limit;
-  const { startDate, endDate } = getDateFilter(req.query);
+  const { page, limit, skip } = validatePagination(req.query, 50);
+  const { startDate, endDate, startDateStr, endDateStr } = getDateFilter(req.query);
 
-  const { total, rows } = await buildStaffReportRows({ startDate, endDate, skip, limit });
+  const { total, rows } = await buildStaffReportRows({
+    startDate,
+    endDate,
+    startDateStr,
+    endDateStr,
+    skip,
+    limit,
+    reportView: req.query.reportView,
+  });
 
   res.status(200).json({
     success: true,
     total,
     page,
-    pages: Math.ceil(total / limit),
+    pages: Math.ceil(total / limit) || 1,
     data: rows,
   });
 });
@@ -1039,18 +2206,23 @@ exports.getStaffReport = asyncHandler(async (req, res) => {
 // @route   GET /api/v1/reports/attendance?page=1&limit=12&month=...&year=...&dateFrom=...&dateTo=...
 // @access  Private/Admin
 exports.getAttendanceReport = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = Math.min(parseInt(req.query.limit, 10) || 12, 100);
-  const skip = (page - 1) * limit;
-  const { startDate, endDate } = getDateFilter(req.query);
+  const { page, limit, skip } = validatePagination(req.query, 100);
+  const dateResult = getDateFilter(req.query);
 
-  const { total, rows } = await buildAttendanceReportRows({ startDate, endDate, skip, limit });
+  const { total, rows } = await buildAttendanceReportRows({
+    startDate: dateResult.startDate,
+    endDate: dateResult.endDate,
+    startDateStr: dateResult.startDateStr,
+    endDateStr: dateResult.endDateStr,
+    skip,
+    limit,
+  });
 
   res.status(200).json({
     success: true,
     total,
     page,
-    pages: Math.ceil(total / limit),
+    pages: Math.ceil(total / limit) || 1,
     data: rows,
   });
 });
@@ -1059,12 +2231,18 @@ exports.getAttendanceReport = asyncHandler(async (req, res) => {
 // @route   GET /api/v1/reports/leads-trend?page=1&limit=12&month=...&year=...&dateFrom=...&dateTo=...
 // @access  Private/Admin
 exports.getLeadsTrendReport = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = Math.min(parseInt(req.query.limit, 10) || 12, 50);
-  const skip = (page - 1) * limit;
-  const { startDate, endDate } = getDateFilter(req.query);
+  const { page, limit, skip } = validatePagination(req.query, 50);
+  const { startDate, endDate, startDateStr, endDateStr } = getDateFilter(req.query);
 
-  const { total, rows } = await buildLeadsTrendRows({ startDate, endDate, skip, limit });
+  const { total, rows } = await buildLeadsTrendRows({
+    startDate,
+    endDate,
+    startDateStr,
+    endDateStr,
+    skip,
+    limit,
+    reportView: req.query.reportView,
+  });
 
   res.status(200).json({
     success: true,
@@ -1079,12 +2257,18 @@ exports.getLeadsTrendReport = asyncHandler(async (req, res) => {
 // @route   GET /api/v1/reports/lead-contribution?page=1&limit=12&month=...&year=...&dateFrom=...&dateTo=...
 // @access  Private/Admin
 exports.getLeadContributionReport = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = Math.min(parseInt(req.query.limit, 10) || 12, 50);
-  const skip = (page - 1) * limit;
-  const { startDate, endDate } = getDateFilter(req.query);
+  const { page, limit, skip } = validatePagination(req.query, 50);
+  const { startDate, endDate, startDateStr, endDateStr } = getDateFilter(req.query);
 
-  const { total, rows } = await buildLeadContributionRows({ startDate, endDate, skip, limit });
+  const { total, rows } = await buildLeadContributionRows({
+    startDate,
+    endDate,
+    startDateStr,
+    endDateStr,
+    skip,
+    limit,
+    reportView: req.query.reportView,
+  });
 
   res.status(200).json({
     success: true,
@@ -1099,20 +2283,25 @@ exports.getLeadContributionReport = asyncHandler(async (req, res) => {
 // @route   GET /api/v1/reports/channel-partner-performance?page=1&limit=12&month=...&year=...&dateFrom=...&dateTo=...
 // @access  Private/Admin
 exports.getChannelPartnerPerformanceReport = asyncHandler(async (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-  const limit = Math.max(1, parseInt(req.query.limit, 10) || 12);
-  const skip = (page - 1) * limit;
-  const { startDate, endDate } = getDateFilter(req.query);
+  const { page, limit, skip } = validatePagination(req.query, 50);
+  const { startDate, endDate, startDateStr, endDateStr } = getDateFilter(req.query);
 
-  const { total, rows } = await buildChannelPartnerPerformanceRows({ startDate, endDate });
-  const paginatedData = rows.slice(skip, skip + limit);
+  const { total, rows } = await buildChannelPartnerPerformanceRows({
+    startDate,
+    endDate,
+    startDateStr,
+    endDateStr,
+    skip,
+    limit,
+    reportView: req.query.reportView,
+  });
 
   res.status(200).json({
     success: true,
     total,
     page,
     pages: Math.ceil(total / limit) || 1,
-    data: paginatedData,
+    data: rows,
   });
 });
 

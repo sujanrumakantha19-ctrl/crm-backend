@@ -22,6 +22,7 @@ const {
   buildLeadsTrendRows,
   buildLeadContributionRows,
   buildChannelPartnerPerformanceRows,
+  buildOperationsMetrics,
 } = require('./reportController');
 
 exports.exportLeads = asyncHandler(async (req, res) => {
@@ -257,38 +258,67 @@ exports.exportChannelPartners = asyncHandler(async (req, res) => {
 });
 
 exports.exportReports = asyncHandler(async (req, res) => {
-  const { tab } = req.query;
-  const { startDate, endDate } = getDateFilter(req.query);
+  const { tab, reportView } = req.query;
+  const { startDate, endDate, startDateStr, endDateStr } = getDateFilter(req.query);
+
+  const filterParams = { startDate, endDate, startDateStr, endDateStr, reportView };
 
   switch (tab) {
     case 'projects': {
-      const { rows } = await buildProjectsReportRows({ startDate, endDate });
+      const { rows } = await buildProjectsReportRows(filterParams);
       streamArrayCSV(req, res, rows, configs.reportProjects.columns, configs.reportProjects.filename);
       return;
     }
     case 'attendance': {
-      const { rows } = await buildAttendanceReportRows({ startDate, endDate });
+      const { rows } = await buildAttendanceReportRows(filterParams);
       streamArrayCSV(req, res, rows, configs.reportAttendance.columns, configs.reportAttendance.filename);
       return;
     }
     case 'staff': {
-      const { rows } = await buildStaffReportRows({ startDate, endDate });
+      const { rows } = await buildStaffReportRows(filterParams);
       streamArrayCSV(req, res, rows, configs.reportStaff.columns, configs.reportStaff.filename);
       return;
     }
     case 'leads-trend': {
-      const { rows } = await buildLeadsTrendRows({ startDate, endDate });
+      const { rows } = await buildLeadsTrendRows(filterParams);
       streamArrayCSV(req, res, rows, configs.reportLeadsTrend.columns, configs.reportLeadsTrend.filename);
       return;
     }
     case 'lead-contribution': {
-      const { rows } = await buildLeadContributionRows({ startDate, endDate });
+      const { rows } = await buildLeadContributionRows(filterParams);
       streamArrayCSV(req, res, rows, configs.reportLeadContribution.columns, configs.reportLeadContribution.filename);
       return;
     }
     case 'channel-partner-performance': {
-      const { rows } = await buildChannelPartnerPerformanceRows({ startDate, endDate });
+      const { rows } = await buildChannelPartnerPerformanceRows(filterParams);
       streamArrayCSV(req, res, rows, configs.reportChannelPartnerPerformance.columns, configs.reportChannelPartnerPerformance.filename);
+      return;
+    }
+    case 'operations': {
+      const data = await buildOperationsMetrics({
+        startDate,
+        endDate,
+        startDateStr,
+        endDateStr,
+        reportView: 'admin',
+      });
+      const rows = [
+        { metric: 'Total Customers (Unique)', value: data.totalCustomers },
+        { metric: 'Loan Customers', value: data.totalLoans },
+        { metric: 'Total Bookings', value: data.totalBookings },
+        { metric: 'Registrations Pending', value: data.registrationPending },
+        { metric: "Today's Scheduled Registrations", value: data.todaysRegistrations },
+        { metric: 'Pending Payment Registrations', value: data.pendingPaymentRegistrations },
+        { metric: 'Payments - Fully Paid', value: data.bookingPayments?.fullyPaid || 0 },
+        { metric: 'Payments - Advance Paid', value: data.bookingPayments?.advancePaid || 0 },
+        { metric: 'Payments - Advance Not Paid', value: data.bookingPayments?.advanceNotPaid || 0 },
+        { metric: 'Payments - Partially Paid', value: data.bookingPayments?.partiallyPaid || 0 },
+        { metric: 'Payments - Not Paid', value: data.bookingPayments?.notPaid || 0 },
+      ];
+      if (data.unknownBookingDateCount !== undefined && data.unknownBookingDateCount > 0) {
+        rows.push({ metric: 'Plots with Unknown Booking Date', value: data.unknownBookingDateCount });
+      }
+      streamArrayCSV(req, res, rows, configs.reportOperations.columns, configs.reportOperations.filename);
       return;
     }
     default:

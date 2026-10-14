@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { exportProtect } = require('../middleware/auth');
+const { exportProtect, authorize } = require('../middleware/auth');
 const {
   exportLeads,
   exportFollowUps,
@@ -27,6 +27,6 @@ router.get('/customers', exportCustomers);
 router.get('/loans', exportLoans);
 router.get('/users', exportUsers);
 router.get('/channel-partners', exportChannelPartners);
-router.get('/reports', exportReports);
+router.get('/reports', authorize('admin'), exportReports);
 
 module.exports = router;
