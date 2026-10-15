@@ -16,6 +16,7 @@ const {
 } = require('../utils/leadPlotLink');
 const { applyPlotPaymentStatusFilter } = require('../utils/plotQueryFilters');
 const { attachRelatedBookings, findCustomerBookingPlots, collapsePlotsByCustomer } = require('../utils/plotCustomerBookings');
+const { queryCustomerGroupedBookings } = require('../services/registrationQueryService');
 
 // ─── Helper: create activity log entry ─────────────────────────────────
 const logActivity = async ({ actor, actionType, action, entityType, entityId, entityName, ipAddress }) => {
@@ -43,6 +44,15 @@ const logActivity = async ({ actor, actionType, action, entityType, entityId, en
 // @route   GET /api/v1/plots
 // @access  Public
 exports.getPlots = asyncHandler(async (req, res, next) => {
+  const isRegistrationGrouped =
+    String(req.query.groupBy || '') === 'customer' &&
+    (req.query.status === 'Booked' || req.query.status === 'Registered');
+
+  if (isRegistrationGrouped) {
+    const result = await queryCustomerGroupedBookings({ user: req.user, query: req.query });
+    return res.status(200).json(result);
+  }
+
   const plots = res.advancedResults.data || [];
 
   const LEAD_SELECT =
@@ -1213,6 +1223,15 @@ exports.getPlotsByStatus = asyncHandler(async (req, res, next) => {
 // @route   GET /api/v1/plots/my-bookings
 // @access  Private (staff)
 exports.getMyBookings = asyncHandler(async (req, res, next) => {
+  const isRegistrationGrouped =
+    String(req.query.groupBy || '') === 'customer' &&
+    (req.query.status === 'Booked' || req.query.status === 'Registered');
+
+  if (isRegistrationGrouped) {
+    const result = await queryCustomerGroupedBookings({ user: req.user, query: req.query, isStaffOnly: true });
+    return res.status(200).json(result);
+  }
+
   const page = parseInt(req.query.page, 10) || 1;
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
   const skip = (page - 1) * limit;
@@ -1366,5 +1385,115 @@ exports.getPlotPendingApproval = asyncHandler(async (req, res, next) => {
   res.status(200).json({
     success: true,
     data: plot.pendingApproval || null,
+  });
+});
+
+// @desc    Get registration filter options (projects, banks, staff)
+// @route   GET /api/v1/plots/registration-options
+// @access  Private
+exports.getRegistrationOptions = asyncHandler(async (req, res, next) => {
+  const isStaff = req.user.role === 'staff';
+
+  if (isStaff) {
+    const myLeads = await Lead.find({ assignedTo: req.user.id }).select('_id plotId plotIds');
+    const myLeadIds = myLeads.map((l) => l._id);
+    const myLegacyPlotIds = myLeads.flatMap((l) => [l.plotId, ...(l.plotIds || [])]).filter(Boolean);
+
+    const staffPlotQuery = {
+      $or: [
+        { assignedTo: req.user.id },
+        { 'bookedBy.staffId': req.user.id },
+        { 'pendingApproval.requestedBy': req.user.id },
+        ...(req.user.displayId ? [{ 'bookedBy.staffDisplayId': req.user.displayId }] : []),
+        ...(myLeadIds.length ? [{ 'bookedBy.leadId': { $in: myLeadIds } }, { 'pendingApproval.leadId': { $in: myLeadIds } }] : []),
+        ...(myLegacyPlotIds.length ? [{ _id: { $in: myLegacyPlotIds } }] : [])
+      ],
+      status: { $in: ['Booked', 'Registered', 'Pending'] },
+    };
+
+    const staffPlots = await Plot.find(staffPlotQuery).select('projectId bookedBy.bank').lean();
+    const projectIds = Array.from(new Set(staffPlots.map((p) => String(p.projectId)).filter(Boolean)));
+    const staffBanks = Array.from(
+      new Set(
+        staffPlots
+          .map((p) => String(p.bookedBy?.bank || '').trim())
+          .filter((b) => b && !['-', '—'].includes(b))
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
+    const projects = projectIds.length
+      ? await Project.find({ _id: { $in: projectIds }, status: { $ne: 'Cancelled' } })
+          .select('_id name displayId location status surveyNumber')
+          .sort({ name: 1 })
+          .lean()
+      : [];
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        projects: projects.map((p) => ({
+          id: String(p._id),
+          _id: String(p._id),
+          name: p.name,
+          displayId: p.displayId,
+          location: p.location,
+          status: p.status,
+          surveyNumber: p.surveyNumber,
+        })),
+        banks: staffBanks,
+        staff: [
+          {
+            id: String(req.user._id || req.user.id),
+            _id: String(req.user._id || req.user.id),
+            name: req.user.name,
+            displayId: req.user.displayId || '',
+            role: req.user.role || 'staff',
+          },
+        ],
+      },
+    });
+  }
+
+  // Admin visibility: all projects, all banks from Booked/Registered plots, all staff & admin users
+  const [projects, banks, staffUsers] = await Promise.all([
+    Project.find({ status: { $ne: 'Cancelled' } })
+      .select('_id name displayId location status surveyNumber')
+      .sort({ name: 1 })
+      .lean(),
+    Plot.distinct('bookedBy.bank', {
+      status: { $in: ['Booked', 'Registered'] },
+      'bookedBy.bank': { $exists: true, $nin: [null, '', '-', '—'] },
+    }),
+    User.find({ role: { $in: ['staff', 'admin'] } })
+      .select('_id name displayId role')
+      .sort({ name: 1 })
+      .lean(),
+  ]);
+
+  const cleanBanks = Array.from(
+    new Set(banks.map((b) => String(b || '').trim()).filter((b) => b && !['-', '—'].includes(b)))
+  ).sort((a, b) => a.localeCompare(b));
+
+  res.status(200).json({
+    success: true,
+    data: {
+      projects: projects.map((p) => ({
+        id: String(p._id),
+        _id: String(p._id),
+        name: p.name,
+        displayId: p.displayId,
+        location: p.location,
+        status: p.status,
+        surveyNumber: p.surveyNumber,
+      })),
+      banks: cleanBanks,
+      staff: staffUsers.map((u) => ({
+        id: String(u._id),
+        _id: String(u._id),
+        name: u.name,
+        displayId: u.displayId,
+        role: u.role,
+      })),
+    },
   });
 });

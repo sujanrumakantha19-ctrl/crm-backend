@@ -53,7 +53,7 @@ function serializePlot(plot) {
   return obj;
 }
 
-async function attachRelatedBookings(plots) {
+async function attachRelatedBookings(plots, options = {}) {
   if (!plots || plots.length === 0) return plots;
 
   const leadIds = new Set();
@@ -81,7 +81,8 @@ async function attachRelatedBookings(plots) {
     or.push({ 'bookedBy.phone': phoneRegex(p10) });
   });
   names.forEach((name) => {
-    or.push({ 'bookedBy.name': { $regex: new RegExp(`^${name}$`, 'i') } });
+    const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    or.push({ 'bookedBy.name': { $regex: new RegExp(`^${escaped}$`, 'i') } });
   });
   displayIds.forEach((dId) => {
     or.push({ 'leadInfo.displayId': dId });
@@ -95,10 +96,15 @@ async function attachRelatedBookings(plots) {
     }));
   }
 
-  const siblings = await Plot.find({
-    status: { $in: BOOKING_STATUSES },
-    $or: or,
-  })
+  const queryConditions = [
+    { status: { $in: BOOKING_STATUSES } },
+    { $or: or },
+  ];
+  if (options.staffAccessOr && options.staffAccessOr.length > 0) {
+    queryConditions.push({ $or: options.staffAccessOr });
+  }
+
+  const siblings = await Plot.find({ $and: queryConditions })
     .select('_id plotNumber status projectId bookedBy.leadId bookedBy.phone bookedBy.name')
     .populate({ path: 'projectId', select: 'name displayId' })
     .limit(2000)

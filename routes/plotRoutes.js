@@ -18,6 +18,7 @@ const {
   getCustomerBookings,
   registerPlot,
   cancelBooking,
+  getRegistrationOptions,
 } = require('../controllers/plotController');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -26,6 +27,7 @@ const expandPlotLeadSearch = require('../middleware/expandPlotLeadSearch');
 const Plot = require('../models/Plot');
 
 // Specific routes BEFORE parameterized routes
+router.route('/registration-options').get(protect, authorize('admin', 'staff'), getRegistrationOptions);
 router.route('/my-bookings').get(protect, authorize('staff'), expandPlotLeadSearch, getMyBookings);
 router.route('/customer-bookings').get(protect, expandPlotLeadSearch, getCustomerBookings);
 router.route('/pending-approvals').get(protect, authorize('admin'), getPendingApprovals);

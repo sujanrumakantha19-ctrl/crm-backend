@@ -5,6 +5,15 @@ const mongoose = require('mongoose');
 const { applyPlotPaymentStatusFilter } = require('../utils/plotQueryFilters');
 
 const advancedResults = (model, populate, searchFields = []) => asyncHandler(async (req, res, next) => {
+  // Customer-grouped plot queries for Booked and Registered registrations are handled by registrationQueryService
+  if (
+    model.modelName === 'Plot' &&
+    String(req.query.groupBy || '') === 'customer' &&
+    (req.query.status === 'Booked' || req.query.status === 'Registered')
+  ) {
+    return next();
+  }
+
   let query;
 
   // Copy req.query
@@ -114,6 +123,9 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
     if (req.plotLeadSearchPlotIds?.length) {
       orConditions.push({ _id: { $in: req.plotLeadSearchPlotIds } });
     }
+    if (req.plotSearchProjectIds?.length) {
+      orConditions.push({ projectId: { $in: req.plotSearchProjectIds } });
+    }
     if (req.plotStaffUserIds?.length) {
       orConditions.push({ assignedTo: { $in: req.plotStaffUserIds } });
       orConditions.push({ 'bookedBy.staffId': { $in: req.plotStaffUserIds } });
@@ -138,6 +150,7 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
         if (hasDisplayId) {
           orConditions.push({ displayId: `PROJ-${num}` });
           orConditions.push({ displayId: `L-${num}` });
+          orConditions.push({ displayId: `LD-${num}` });
           orConditions.push({ displayId: `CP-${num}` });
           orConditions.push({ displayId: `STAFF-${num}` });
         }
@@ -155,11 +168,12 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
         orConditions.push({ displayId: `PROJ-${num}` });
       }
 
-      // Match Lead / Customer ID: "L-12", "C-12", "cust-12", "customer-12", "l 12", "c 12"
-      const leadOrCustMatch = rawSearch.match(/^(?:l|c|cust|customer)[\s-]*(\d+)$/i);
+      // Match Lead / Customer ID: "L-12", "C-12", "cust-12", "customer-12", "ld-12", "l 12", "c 12"
+      const leadOrCustMatch = rawSearch.match(/^(?:l|c|cust|customer|ld)[\s-]*(\d+)$/i);
       if (leadOrCustMatch && hasDisplayId) {
         const num = parseInt(leadOrCustMatch[1], 10);
         orConditions.push({ displayId: `L-${num}` });
+        orConditions.push({ displayId: `LD-${num}` });
       }
 
       const cpMatch = rawSearch.match(/^cp[\s-]*(\d+)$/i);
