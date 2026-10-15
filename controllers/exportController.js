@@ -77,46 +77,132 @@ exports.exportFollowUps = asyncHandler(async (req, res) => {
   streamCSV(req, res, cursor, columns, cfg.filename);
 });
 
-exports.exportAttendance = asyncHandler(async (req, res) => {
-  const { date, employeeId, staffId, month, year, tab } = req.query;
+exports.exportAttendance = asyncHandler(async (req, res, next) => {
+  const { queryDailyAttendance } = require('../services/attendanceDailyService');
+  const ErrorResponse = require('../utils/errorResponse');
+  const { date, employeeId, staffId, month, year, dateFrom, dateTo, status, tab } = req.query;
   const targetStaffId = employeeId || staffId || req.query.userId;
-  const filter = {};
-  if (date) {
-    filter.date = { $regex: `^${date}` };
-  } else if (month) {
-    filter.date = { $regex: `^${month}` };
-  } else if (year) {
-    filter.date = { $regex: `^${year}` };
-  }
 
-  if (targetStaffId) {
-    const mongoose = require('mongoose');
-    const matches = [String(targetStaffId)];
-    if (mongoose.Types.ObjectId.isValid(targetStaffId)) {
-      matches.push(new mongoose.Types.ObjectId(targetStaffId));
+  // Enforce permissions:
+  if (req.user && req.user.role === 'partner') {
+    return next(new ErrorResponse('Channel partners are not authorized to export attendance', 403));
+  }
+  if (req.user && req.user.role === 'staff') {
+    const staffUid = String(req.user.id || req.user._id);
+    if (targetStaffId && String(targetStaffId) !== staffUid) {
+      return next(new ErrorResponse('Staff members are only allowed to export their own attendance', 403));
     }
-    filter.$or = [
-      { staffId: { $in: matches } },
-      { userId: { $in: matches } },
-    ];
   }
 
-  if (req.query.status && req.query.status !== 'All' && req.query.status !== 'all') {
-    filter.status = req.query.status;
-  }
-
-  const query = Attendance.find(filter).sort({ date: -1 }).lean();
+  const result = await queryDailyAttendance({
+    staffId: targetStaffId,
+    date,
+    month,
+    year,
+    dateFrom,
+    dateTo,
+    status,
+    userRole: req.user ? req.user.role : 'admin',
+    requestingUserId: req.user ? (req.user.id || req.user._id) : null,
+    paginate: false,
+  });
 
   const isModal = tab === 'details';
-  const cfg = isModal ? configs.attendanceModal : configs.attendanceMain;
-
-  let filename = cfg.filename;
+  let filename = isModal ? 'attendance-details' : 'attendance-summary';
   if (date) filename = `attendance-${date}`;
   else if (month) filename = `attendance-${month}`;
   else if (year) filename = `attendance-${year}`;
 
-  const cursor = query.cursor();
-  streamCSV(req, res, cursor, cfg.columns, filename);
+  if (isModal) {
+    // Detail export: Flatten sessions, retaining separate session duration, daily duration and daily status
+    const detailRows = [];
+    result.allRecords.forEach(daily => {
+      if (daily.sessions && daily.sessions.length > 0) {
+        daily.sessions.forEach(s => {
+          detailRows.push({
+            staffName: daily.staffName,
+            role: daily.role,
+            date: daily.date,
+            activityType: s.activityType || 'Office',
+            location: s.location || (s.projectId && typeof s.projectId === 'object' ? s.projectId.location : '-') || '-',
+            projectName: s.projectName || (s.projectId && typeof s.projectId === 'object' ? s.projectId.name : '-') || '-',
+            checkIn: s.checkIn || '-',
+            checkOut: s.checkOut || '-',
+            sessionDuration: s.duration || (s.parsedMinutes ? `${Math.floor(s.parsedMinutes / 60)}h ${s.parsedMinutes % 60}m` : '-'),
+            dailyDuration: daily.formattedDuration,
+            dailyStatus: daily.status,
+            status: daily.status,
+            duration: s.duration || daily.formattedDuration,
+          });
+        });
+      } else {
+        detailRows.push({
+          staffName: daily.staffName,
+          role: daily.role,
+          date: daily.date,
+          activityType: 'Office',
+          location: '-',
+          projectName: '-',
+          checkIn: '-',
+          checkOut: '-',
+          sessionDuration: '-',
+          dailyDuration: daily.formattedDuration,
+          dailyStatus: daily.status,
+          status: daily.status,
+          duration: '-',
+        });
+      }
+    });
+
+    const columns = [
+      { key: 'staffName', label: 'Employee' },
+      { key: 'role', label: 'Role' },
+      { key: 'date', label: 'Date' },
+      { key: 'activityType', label: 'Activity Type' },
+      { key: 'location', label: 'Location' },
+      { key: 'projectName', label: 'Project' },
+      { key: 'checkIn', label: 'Check In' },
+      { key: 'checkOut', label: 'Check Out' },
+      { key: 'sessionDuration', label: 'Session Duration' },
+      { key: 'dailyDuration', label: 'Daily Duration' },
+      { key: 'dailyStatus', label: 'Daily Status' },
+    ];
+
+    streamArrayCSV(req, res, detailRows, columns, filename);
+  } else {
+    // Summary export: One staff/day row with daily status, daily duration, first check-in, last check-out
+    const summaryRows = result.allRecords.map(daily => ({
+      staffName: daily.staffName,
+      role: daily.role,
+      date: daily.date,
+      status: daily.status,
+      checkIn: daily.firstCheckIn || '-',
+      checkOut: daily.lastCheckOut || '-',
+      duration: daily.formattedDuration,
+      sessionsCount: daily.sessionsCount || 0,
+      activityType: daily.currentActivity || 'Office',
+      location: daily.currentLocation || '-',
+      projectName: daily.currentLocation || '-',
+      isOverridden: daily.isOverridden ? 'Yes' : 'No',
+      overrideNotes: daily.overrideNotes || '',
+    }));
+
+    const columns = [
+      { key: 'staffName', label: 'Staff' },
+      { key: 'role', label: 'Role' },
+      { key: 'date', label: 'Date' },
+      { key: 'status', label: 'Status' },
+      { key: 'checkIn', label: 'First Check In' },
+      { key: 'checkOut', label: 'Last Check Out' },
+      { key: 'duration', label: 'Daily Worked Hours' },
+      { key: 'sessionsCount', label: 'Sessions Count' },
+      { key: 'isOverridden', label: 'Admin Overridden' },
+      { key: 'activityType', label: 'Activity Type' },
+      { key: 'location', label: 'Location' },
+    ];
+
+    streamArrayCSV(req, res, summaryRows, columns, filename);
+  }
 });
 
 exports.exportTasks = asyncHandler(async (req, res) => {

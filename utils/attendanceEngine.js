@@ -110,7 +110,7 @@ function formatMinutesToDuration(totalMinutes) {
 
 /**
  * Calculate worked minutes for a single attendance session.
- * Returns: { minutes: number, isClosed: boolean, isInvalid: boolean }
+ * Returns: { minutes: number, isClosed: boolean, isInvalid: boolean, reviewReason?: string, inMins?: number, outMins?: number }
  */
 function calculateSessionMinutes(session, sessionDate, todayDateStr) {
   const isToday = sessionDate === todayDateStr;
@@ -118,7 +118,7 @@ function calculateSessionMinutes(session, sessionDate, todayDateStr) {
   const hasCheckOut = !!(session.checkOut && session.checkOut !== '-' && session.checkOut !== '—');
 
   if (!hasCheckIn) {
-    return { minutes: 0, isClosed: false, isInvalid: true, hasCheckIn: false };
+    return { minutes: 0, isClosed: false, isInvalid: true, hasCheckIn: false, reviewReason: 'missing_check_in' };
   }
 
   const inMins = parseTimeToMinutes(session.checkIn);
@@ -126,33 +126,47 @@ function calculateSessionMinutes(session, sessionDate, todayDateStr) {
   if (hasCheckOut) {
     const outMins = parseTimeToMinutes(session.checkOut);
     if (inMins !== null && outMins !== null) {
-      let diff = outMins - inMins;
-      if (diff < 0) {
-        // Handled as crossing midnight or clock correction
-        diff += 24 * 60;
+      if (outMins >= inMins) {
+        const diff = outMins - inMins;
+        return { minutes: diff, isClosed: true, isInvalid: false, hasCheckIn: true, inMins, outMins };
       }
-      return { minutes: diff, isClosed: true, isInvalid: false, hasCheckIn: true };
+
+      // If outMins < inMins: check if session is explicitly overnight
+      if (session.isOvernight) {
+        const diff = (24 * 60 - inMins) + outMins;
+        return { minutes: diff, isClosed: true, isInvalid: false, hasCheckIn: true, inMins, outMins };
+      }
+
+      // Fallback to strictly parsed completed-session duration if trustworthy
+      if (session.duration && session.duration !== '-' && session.duration !== '—') {
+        const parsedMins = parseDurationToMinutes(session.duration);
+        if (parsedMins > 0) {
+          return { minutes: parsedMins, isClosed: true, isInvalid: false, hasCheckIn: true, inMins, outMins };
+        }
+      }
+
+      // Reversed clock without valid duration establishes unreliable timestamps
+      return {
+        minutes: 0,
+        isClosed: true,
+        isInvalid: true,
+        hasCheckIn: true,
+        reviewReason: 'invalid_timestamps',
+        inMins,
+        outMins,
+      };
     }
 
-    // Fallback to session.duration if stored as string
+    // Fallback to session.duration if stored as string and valid
     if (session.duration && session.duration !== '-' && session.duration !== '—') {
       const parsedMins = parseDurationToMinutes(session.duration);
       if (parsedMins > 0) {
-        return { minutes: parsedMins, isClosed: true, isInvalid: false, hasCheckIn: true };
+        return { minutes: parsedMins, isClosed: true, isInvalid: false, hasCheckIn: true, inMins: inMins ?? 0, outMins: (inMins ?? 0) + parsedMins };
       }
     }
 
-    // Fallback to createdAt and updatedAt timestamps
-    if (session.createdAt && session.updatedAt) {
-      const start = new Date(session.createdAt).getTime();
-      const end = new Date(session.updatedAt).getTime();
-      if (end > start) {
-        const diffMins = Math.round((end - start) / 60000);
-        return { minutes: diffMins, isClosed: true, isInvalid: false, hasCheckIn: true };
-      }
-    }
-
-    return { minutes: 0, isClosed: true, isInvalid: false, hasCheckIn: true };
+    // Timestamps could not safely establish duration
+    return { minutes: 0, isClosed: true, isInvalid: true, hasCheckIn: true, reviewReason: 'unreliable_timestamps' };
   }
 
   // No checkout
@@ -160,19 +174,19 @@ function calculateSessionMinutes(session, sessionDate, todayDateStr) {
     // Active session in progress today: calculate elapsed minutes so far
     if (inMins !== null) {
       const nowIST = new Date();
-      // UTC to IST
+      // UTC to IST (+05:30)
       const istHours = (nowIST.getUTCHours() + 5 + Math.floor((nowIST.getUTCMinutes() + 30) / 60)) % 24;
       const istMinutes = (nowIST.getUTCMinutes() + 30) % 60;
       const nowMins = istHours * 60 + istMinutes;
       let diff = nowMins - inMins;
       if (diff < 0) diff = 0;
-      return { minutes: diff, isClosed: false, isInvalid: false, hasCheckIn: true };
+      return { minutes: diff, isClosed: false, isInvalid: false, hasCheckIn: true, inMins, outMins: null };
     }
-    return { minutes: 0, isClosed: false, isInvalid: false, hasCheckIn: true };
+    return { minutes: 0, isClosed: false, isInvalid: false, hasCheckIn: true, inMins: null, outMins: null };
   }
 
   // Past session with no checkout -> needs review
-  return { minutes: 0, isClosed: false, isInvalid: true, hasCheckIn: true };
+  return { minutes: 0, isClosed: false, isInvalid: true, hasCheckIn: true, reviewReason: 'unclosed_historical_session' };
 }
 
 /**
@@ -246,6 +260,8 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
   let activeLocation = null;
 
   const validSessions = [];
+  const reviewReasons = [];
+  const intervals = [];
 
   // Sort sessions chronologically
   const sortedSessions = [...sessions].sort((a, b) => {
@@ -258,10 +274,20 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
     const evalResult = calculateSessionMinutes(session, dateStr, todayDateStr);
     if (!evalResult.hasCheckIn) return; // Skip records with no checkIn
 
+    if (evalResult.reviewReason) {
+      if (!reviewReasons.includes(evalResult.reviewReason)) {
+        reviewReasons.push(evalResult.reviewReason);
+      }
+      if (evalResult.isInvalid) {
+        hasNeedsReview = true;
+      }
+    }
+
     validSessions.push({
       ...session,
       parsedMinutes: evalResult.minutes,
       isClosed: evalResult.isClosed,
+      reviewReason: evalResult.reviewReason || null,
     });
 
     if (!firstCheckIn && session.checkIn && session.checkIn !== '-' && session.checkIn !== '—') {
@@ -273,7 +299,13 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
     }
 
     if (evalResult.isClosed) {
-      totalCompletedMinutes += evalResult.minutes;
+      if (!evalResult.isInvalid) {
+        if (evalResult.inMins !== undefined && evalResult.outMins !== undefined && evalResult.outMins >= evalResult.inMins) {
+          intervals.push([evalResult.inMins, evalResult.outMins]);
+        } else {
+          totalCompletedMinutes += evalResult.minutes;
+        }
+      }
     } else {
       if (isToday) {
         hasOpenSession = true;
@@ -282,9 +314,55 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
       } else {
         // Past date with unclosed checkout
         hasNeedsReview = true;
+        if (!reviewReasons.includes('unclosed_historical_session')) {
+          reviewReasons.push('unclosed_historical_session');
+        }
       }
     }
   });
+
+  // Calculate non-overlapping minutes from intervals
+  if (intervals.length > 0) {
+    intervals.sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    let hadOverlap = false;
+    for (const cur of intervals) {
+      if (merged.length === 0) {
+        merged.push([...cur]);
+      } else {
+        const prev = merged[merged.length - 1];
+        if (cur[0] < prev[1]) {
+          hadOverlap = true;
+          prev[1] = Math.max(prev[1], cur[1]);
+        } else {
+          merged.push([...cur]);
+        }
+      }
+    }
+    if (hadOverlap) {
+      if (!reviewReasons.includes('overlapping_sessions')) {
+        reviewReasons.push('overlapping_sessions');
+      }
+      hasNeedsReview = true;
+    }
+    const intervalMinutes = merged.reduce((sum, int) => sum + (int[1] - int[0]), 0);
+    totalCompletedMinutes += intervalMinutes;
+  }
+
+  // Derive automatic calculated status before override
+  let calculatedStatus = 'Absent';
+  if (validSessions.length === 0) {
+    if (isBeforeJoining) calculatedStatus = 'Not Joined';
+    else if (dayOfWeek === 0) calculatedStatus = 'Weekly Off';
+    else if (isFuture) calculatedStatus = 'Scheduled';
+    else calculatedStatus = 'Absent';
+  } else if (hasNeedsReview) {
+    calculatedStatus = 'Needs Review';
+  } else if (hasOpenSession) {
+    calculatedStatus = totalCompletedMinutes > STATUS_THRESHOLDS.FULL_DAY_MIN_MINUTES ? 'Present' : 'In Progress';
+  } else {
+    calculatedStatus = classifyMinutesToStatus(totalCompletedMinutes);
+  }
 
   // Check Admin Override
   if (override && override.status) {
@@ -295,6 +373,8 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
       role,
       date: dateStr,
       status: override.status,
+      effectiveStatus: override.status,
+      calculatedStatus,
       isOverridden: true,
       overrideNotes: override.notes || '',
       overriddenBy: override.overriddenBy || null,
@@ -305,76 +385,21 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
       firstCheckIn: firstCheckIn || '-',
       lastCheckOut: lastCheckOut || '-',
       hasActiveSession: hasOpenSession,
+      reviewReasons,
     };
   }
 
   // If no sessions exist for the date:
   if (validSessions.length === 0) {
-    if (isBeforeJoining) {
-      return {
-        staffId,
-        staffName,
-        email,
-        role,
-        date: dateStr,
-        status: 'Not Joined',
-        isOverridden: false,
-        totalMinutes: 0,
-        formattedDuration: '-',
-        sessionsCount: 0,
-        sessions: [],
-        firstCheckIn: '-',
-        lastCheckOut: '-',
-        hasActiveSession: false,
-      };
-    }
-
-    if (dayOfWeek === 0) {
-      return {
-        staffId,
-        staffName,
-        email,
-        role,
-        date: dateStr,
-        status: 'Weekly Off',
-        isOverridden: false,
-        totalMinutes: 0,
-        formattedDuration: '-',
-        sessionsCount: 0,
-        sessions: [],
-        firstCheckIn: '-',
-        lastCheckOut: '-',
-        hasActiveSession: false,
-      };
-    }
-
-    if (isFuture) {
-      return {
-        staffId,
-        staffName,
-        email,
-        role,
-        date: dateStr,
-        status: 'Scheduled',
-        isOverridden: false,
-        totalMinutes: 0,
-        formattedDuration: '-',
-        sessionsCount: 0,
-        sessions: [],
-        firstCheckIn: '-',
-        lastCheckOut: '-',
-        hasActiveSession: false,
-      };
-    }
-
-    // Past working date with no check-in => Absent
     return {
       staffId,
       staffName,
       email,
       role,
       date: dateStr,
-      status: 'Absent',
+      status: calculatedStatus,
+      effectiveStatus: calculatedStatus,
+      calculatedStatus,
       isOverridden: false,
       totalMinutes: 0,
       formattedDuration: '-',
@@ -383,10 +408,11 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
       firstCheckIn: '-',
       lastCheckOut: '-',
       hasActiveSession: false,
+      reviewReasons: [],
     };
   }
 
-  // If historical sessions had an unclosed checkout
+  // If historical sessions had an unclosed checkout or invalid timestamps
   if (hasNeedsReview) {
     return {
       staffId,
@@ -395,6 +421,8 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
       role,
       date: dateStr,
       status: 'Needs Review',
+      effectiveStatus: 'Needs Review',
+      calculatedStatus: 'Needs Review',
       isOverridden: false,
       totalMinutes: totalCompletedMinutes,
       formattedDuration: formatMinutesToDuration(totalCompletedMinutes),
@@ -403,40 +431,21 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
       firstCheckIn: firstCheckIn || '-',
       lastCheckOut: lastCheckOut || '-',
       hasActiveSession: false,
+      reviewReasons,
     };
   }
 
   // If session is active today:
   if (hasOpenSession) {
-    // If completed work already exceeds 8 hours, it's definitely Present
-    if (totalCompletedMinutes > STATUS_THRESHOLDS.FULL_DAY_MIN_MINUTES) {
-      return {
-        staffId,
-        staffName,
-        email,
-        role,
-        date: dateStr,
-        status: 'Present',
-        isOverridden: false,
-        totalMinutes: totalCompletedMinutes,
-        formattedDuration: formatMinutesToDuration(totalCompletedMinutes),
-        sessionsCount: validSessions.length,
-        sessions: validSessions,
-        firstCheckIn: firstCheckIn || '-',
-        lastCheckOut: '-',
-        hasActiveSession: true,
-        currentActivity: activeActivity,
-        currentLocation: activeLocation,
-      };
-    }
-
     return {
       staffId,
       staffName,
       email,
       role,
       date: dateStr,
-      status: 'In Progress',
+      status: calculatedStatus,
+      effectiveStatus: calculatedStatus,
+      calculatedStatus,
       isOverridden: false,
       totalMinutes: totalCompletedMinutes,
       formattedDuration: formatMinutesToDuration(totalCompletedMinutes),
@@ -447,12 +456,11 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
       hasActiveSession: true,
       currentActivity: activeActivity,
       currentLocation: activeLocation,
+      reviewReasons,
     };
   }
 
   // All sessions closed on this day:
-  const calculatedStatus = classifyMinutesToStatus(totalCompletedMinutes);
-
   return {
     staffId,
     staffName,
@@ -460,6 +468,8 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
     role,
     date: dateStr,
     status: calculatedStatus,
+    effectiveStatus: calculatedStatus,
+    calculatedStatus,
     isOverridden: false,
     totalMinutes: totalCompletedMinutes,
     formattedDuration: formatMinutesToDuration(totalCompletedMinutes),
@@ -468,6 +478,7 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
     firstCheckIn: firstCheckIn || '-',
     lastCheckOut: lastCheckOut || '-',
     hasActiveSession: false,
+    reviewReasons,
   };
 }
 

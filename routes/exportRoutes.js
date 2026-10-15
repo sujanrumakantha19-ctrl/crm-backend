@@ -19,7 +19,7 @@ router.use(exportProtect);
 
 router.get('/leads', exportLeads);
 router.get('/follow-ups', exportFollowUps);
-router.get('/attendance', exportAttendance);
+router.get('/attendance', authorize('admin', 'staff'), exportAttendance);
 router.get('/tasks', exportTasks);
 router.get('/projects', exportProjects);
 router.get('/project-detail', exportProjectDetail);

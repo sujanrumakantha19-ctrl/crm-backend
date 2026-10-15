@@ -27,23 +27,26 @@ const scopeStaffAttendance = (req, res, next) => {
   next();
 };
 
+// Protect all attendance routes: only admin and staff (reject partner with 403)
+router.use(protect, authorize('admin', 'staff'));
+
 // Specific routes BEFORE parameterized routes
-router.route('/presence/today').get(protect, getTodayPresence);
-router.route('/daily').get(protect, getDailyAttendance);
-router.route('/override').post(protect, authorize('admin'), setAttendanceOverride);
-router.route('/today').get(protect, getTodayAttendance);
-router.route('/staff/:staffId').get(protect, getAttendanceByStaff);
-router.route('/date/:date').get(protect, getAttendanceByDate);
+router.route('/presence/today').get(authorize('admin'), getTodayPresence);
+router.route('/daily').get(getDailyAttendance);
+router.route('/override').post(authorize('admin'), setAttendanceOverride);
+router.route('/today').get(getTodayAttendance);
+router.route('/staff/:staffId').get(getAttendanceByStaff);
+router.route('/date/:date').get(getAttendanceByDate);
 
 router
   .route('/')
-  .get(protect, scopeStaffAttendance, advancedResults(Attendance, { path: 'staffId', select: 'name initials role' }), getAttendances)
-  .post(protect, createAttendance);
+  .get(scopeStaffAttendance, advancedResults(Attendance, { path: 'staffId', select: 'name initials role' }), getAttendances)
+  .post(createAttendance);
 
 router
   .route('/:id')
-  .get(protect, getAttendance)
-  .put(protect, updateAttendance)
-  .delete(protect, deleteAttendance);
+  .get(getAttendance)
+  .put(updateAttendance)
+  .delete(deleteAttendance);
 
 module.exports = router;

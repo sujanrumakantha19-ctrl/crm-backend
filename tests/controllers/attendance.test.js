@@ -292,4 +292,80 @@ describe('Attendance Controller', () => {
       expect(removeRes.body.data).toBeNull();
     });
   });
+
+  describe('Attendance Hardening & Permissions', () => {
+    it('should return 403 Forbidden when a channel partner accesses attendance endpoints', async () => {
+      const { createPartnerUser } = require('../helpers');
+      const partner = await createPartnerUser();
+
+      const getRes = await request(app)
+        .get('/api/v1/attendance')
+        .set('Authorization', `Bearer ${partner.token}`);
+      expect(getRes.status).toBe(403);
+
+      const exportRes = await request(app)
+        .get('/api/v1/export/attendance')
+        .set('Authorization', `Bearer ${partner.token}`);
+      expect(exportRes.status).toBe(403);
+    });
+
+    it('should perform checkout idempotently without re-extending duration on repeated requests', async () => {
+      const att = await Attendance.create({
+        staffId: staffUser._id,
+        staffName: staffUser.name,
+        date: '2024-06-15',
+        checkIn: '09:00',
+        checkOut: '17:00',
+        duration: '8h 0m',
+        status: 'Present',
+        role: 'staff',
+      });
+
+      // Calling update again on an already checked-out session returns the existing document
+      const res = await request(app)
+        .put(`/api/v1/attendance/${att._id}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ checkOut: '19:00' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.checkOut).toBe('17:00');
+      expect(res.body.data.duration).toBe('8h 0m');
+    });
+
+    it('should reject inverted date ranges with 400 in getDailyAttendance', async () => {
+      const res = await request(app)
+        .get('/api/v1/attendance/daily?dateFrom=2024-06-25&dateTo=2024-06-10')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/start date cannot be after end date/i);
+    });
+
+    it('should stream attendance summary CSV with 1 row per staff/day and details CSV with session breakdown', async () => {
+      await Attendance.create([
+        { staffId: staffUser._id, staffName: staffUser.name, date: '2024-06-18', checkIn: '09:00', checkOut: '12:00', duration: '3h 0m', status: 'Present', role: 'staff' },
+        { staffId: staffUser._id, staffName: staffUser.name, date: '2024-06-18', checkIn: '13:00', checkOut: '16:00', duration: '3h 0m', status: 'Present', role: 'staff' },
+      ]);
+
+      // Summary export
+      const summaryRes = await request(app)
+        .get('/api/v1/export/attendance?date=2024-06-18')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(summaryRes.status).toBe(200);
+      expect(summaryRes.text).toContain('"Staff","Role","Date","Status"');
+      // Should have 1 row for staffUser on that date
+      const summaryLines = summaryRes.text.trim().split('\n');
+      expect(summaryLines.length).toBe(2); // Header + 1 staff row
+      expect(summaryRes.text).toContain('Half Day'); // 3h + 3h = 6h Half Day
+
+      // Details export
+      const detailsRes = await request(app)
+        .get('/api/v1/export/attendance?date=2024-06-18&tab=details')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(detailsRes.status).toBe(200);
+      expect(detailsRes.text).toContain('"Session Duration","Daily Duration","Daily Status"');
+      const detailLines = detailsRes.text.trim().split('\n');
+      expect(detailLines.length).toBe(3); // Header + 2 sessions
+    });
+  });
 });
+

@@ -809,27 +809,49 @@ async function buildStaffReportRows({ startDate, endDate, skip, limit, reportVie
   return { total, rows };
 }
 
-async function buildAttendanceReportRows({ startDate, endDate, startDateStr, endDateStr, skip, limit }) {
-  const query = {};
+async function buildAttendanceReportRows({ startDate, endDate, startDateStr, endDateStr, skip = 0, limit = 50, status, staffId }) {
+  const { queryDailyAttendance } = require('../services/attendanceDailyService');
   const startStr = startDateStr || (startDate ? new Date(startDate.getTime() + 19800000).toISOString().slice(0, 10) : null);
   const endStr = endDateStr || (endDate ? new Date(endDate.getTime() + 19800000).toISOString().slice(0, 10) : null);
 
-  if (startStr || endStr) {
-    const dateCond = {};
-    if (startStr) dateCond.$gte = startStr;
-    if (endStr) dateCond.$lte = endStr;
-    query.date = dateCond;
-  }
+  const safeLimit = Math.max(Number.isInteger(limit) && limit > 0 ? limit : 50, 1);
+  const safeSkip = Math.max(Number.isInteger(skip) && skip > 0 ? skip : 0, 0);
+  const safePage = Math.floor(safeSkip / safeLimit) + 1;
 
-  const base = Attendance.find(query).sort('-date -createdAt _id');
-  const [total, rows] = await Promise.all([
-    Attendance.countDocuments(query),
-    Number.isInteger(skip) && Number.isInteger(limit) && (skip > 0 || limit > 0)
-      ? base.clone().skip(skip).limit(limit).lean()
-      : base.clone().lean(),
-  ]);
+  const result = await queryDailyAttendance({
+    staffId,
+    dateFrom: startStr,
+    dateTo: endStr,
+    status,
+    page: safePage,
+    limit: safeLimit,
+    userRole: 'admin',
+    paginate: true,
+  });
 
-  return { total, rows };
+  const rows = result.data.map(r => ({
+    _id: `${r.staffId}_${r.date}`,
+    staffId: r.staffId,
+    staffName: r.staffName,
+    email: r.email,
+    date: r.date,
+    status: r.status,
+    effectiveStatus: r.effectiveStatus,
+    calculatedStatus: r.calculatedStatus,
+    isOverridden: r.isOverridden,
+    overrideNotes: r.overrideNotes,
+    checkIn: r.firstCheckIn,
+    checkOut: r.lastCheckOut,
+    duration: r.formattedDuration,
+    role: r.role,
+    location: r.currentLocation || '-',
+    projectName: r.currentLocation || '-',
+    sessionsCount: r.sessionsCount,
+    sessions: r.sessions,
+    reviewReasons: r.reviewReasons,
+  }));
+
+  return { total: result.total, rows, summary: result.summary };
 }
 
 function formatTrendRow(item) {
@@ -2209,13 +2231,15 @@ exports.getAttendanceReport = asyncHandler(async (req, res) => {
   const { page, limit, skip } = validatePagination(req.query, 100);
   const dateResult = getDateFilter(req.query);
 
-  const { total, rows } = await buildAttendanceReportRows({
+  const { total, rows, summary } = await buildAttendanceReportRows({
     startDate: dateResult.startDate,
     endDate: dateResult.endDate,
     startDateStr: dateResult.startDateStr,
     endDateStr: dateResult.endDateStr,
     skip,
     limit,
+    status: req.query.status,
+    staffId: req.query.staffId || req.query.employeeId,
   });
 
   res.status(200).json({
@@ -2223,6 +2247,7 @@ exports.getAttendanceReport = asyncHandler(async (req, res) => {
     total,
     page,
     pages: Math.ceil(total / limit) || 1,
+    summary,
     data: rows,
   });
 });
