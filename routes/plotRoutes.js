@@ -24,12 +24,13 @@ const {
 const { protect, authorize } = require('../middleware/auth');
 const advancedResults = require('../middleware/advancedResults');
 const expandPlotLeadSearch = require('../middleware/expandPlotLeadSearch');
+const validatePlotQueryParams = require('../middleware/validatePlotQueryParams');
 const Plot = require('../models/Plot');
 
 // Specific routes BEFORE parameterized routes
 router.route('/registration-options').get(protect, authorize('admin', 'staff'), getRegistrationOptions);
-router.route('/my-bookings').get(protect, authorize('staff'), expandPlotLeadSearch, getMyBookings);
-router.route('/customer-bookings').get(protect, expandPlotLeadSearch, getCustomerBookings);
+router.route('/my-bookings').get(protect, authorize('staff'), validatePlotQueryParams, expandPlotLeadSearch, getMyBookings);
+router.route('/customer-bookings').get(protect, validatePlotQueryParams, expandPlotLeadSearch, getCustomerBookings);
 router.route('/pending-approvals').get(protect, authorize('admin'), getPendingApprovals);
 router.route('/status/:status').get(protect, getPlotsByStatus);
 router.route('/project/:projectId').get(protect, getPlotsByProject);
@@ -42,7 +43,7 @@ router.route('/:id/register').put(protect, authorize('admin', 'staff'), register
 
 router
   .route('/')
-  .get(protect, expandPlotLeadSearch, advancedResults(Plot, { path: 'projectId', select: 'name location status surveyNumber displayId' }, [
+  .get(protect, validatePlotQueryParams, expandPlotLeadSearch, advancedResults(Plot, { path: 'projectId', select: 'name location status surveyNumber displayId' }, [
     'plotNumber',
     'bookedBy.name',
     'bookedBy.phone',

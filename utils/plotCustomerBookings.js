@@ -53,18 +53,45 @@ function serializePlot(plot) {
   return obj;
 }
 
+function customerIdentityKeys(plot) {
+  const keys = [];
+  const p10 = last10(plot.bookedBy?.phone || plot.leadInfo?.phone);
+  if (p10.length === 10) keys.push(`p:${p10}`);
+
+  const displayId = String(plot.leadInfo?.displayId || '').trim().toUpperCase();
+  if (displayId) keys.push(`d:${displayId}`);
+
+  const leadId = String(
+    plot.bookedBy?.leadId ||
+    plot.leadInfo?._id ||
+    plot.leadId ||
+    plot.pendingApproval?.leadId ||
+    ''
+  );
+  if (leadId && isMongoId(leadId)) keys.push(`l:${leadId}`);
+
+  if (!p10 && !displayId && !leadId) {
+    const name = String(plot.bookedBy?.name || plot.leadInfo?.customerName || '').toLowerCase().trim();
+    if (name) keys.push(`n:${name}`);
+  }
+
+  if (keys.length === 0) {
+    keys.push(`id:${plot._id || plot.id || ''}`);
+  }
+  return keys;
+}
+
 async function attachRelatedBookings(plots, options = {}) {
   if (!plots || plots.length === 0) return plots;
 
   const leadIds = new Set();
   const phones = new Set();
-
   const names = new Set();
   const displayIds = new Set();
 
   plots.forEach((p) => {
-    const lid = p.bookedBy?.leadId || p.leadInfo?._id || p.leadId;
-    if (lid) leadIds.add(String(lid));
+    const lid = p.bookedBy?.leadId || p.leadInfo?._id || p.leadId || p.pendingApproval?.leadId;
+    if (lid && isMongoId(String(lid))) leadIds.add(String(lid));
     const p10 = last10(p.bookedBy?.phone || p.leadInfo?.phone);
     if (p10.length === 10) phones.add(p10);
     const name = String(p.bookedBy?.name || p.leadInfo?.customerName || '').toLowerCase().trim();
@@ -75,7 +102,10 @@ async function attachRelatedBookings(plots, options = {}) {
 
   const or = [];
   if (leadIds.size > 0) {
-    or.push({ 'bookedBy.leadId': { $in: Array.from(leadIds) } });
+    const arrLeadIds = Array.from(leadIds);
+    or.push({ 'bookedBy.leadId': { $in: arrLeadIds } });
+    or.push({ 'pendingApproval.leadId': { $in: arrLeadIds } });
+    or.push({ leadId: { $in: arrLeadIds } });
   }
   phones.forEach((p10) => {
     or.push({ 'bookedBy.phone': phoneRegex(p10) });
@@ -105,42 +135,78 @@ async function attachRelatedBookings(plots, options = {}) {
   }
 
   const siblings = await Plot.find({ $and: queryConditions })
-    .select('_id plotNumber status projectId bookedBy.leadId bookedBy.phone bookedBy.name')
+    .select('_id plotNumber status projectId bookedBy pendingApproval leadId leadInfo assignedTo')
     .populate({ path: 'projectId', select: 'name displayId' })
-    .limit(2000)
     .lean();
 
-  const groups = new Map();
+  // Combine target plots and fetched siblings for disjoint-set identity grouping
+  const allCandidatesMap = new Map();
+  plots.forEach((p) => {
+    const id = String(p._id || p.id);
+    allCandidatesMap.set(id, p);
+  });
   siblings.forEach((s) => {
-    const key = customerKeyFromPlot(s);
-    if (!key.startsWith('l:') && !key.startsWith('p:') && !key.startsWith('n:')) return;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(s);
+    const id = String(s._id || s.id);
+    if (!allCandidatesMap.has(id)) {
+      allCandidatesMap.set(id, s);
+    }
+  });
+
+  const allCandidates = Array.from(allCandidatesMap.values());
+  const parent = allCandidates.map((_, i) => i);
+  const findRoot = (i) => {
+    if (parent[i] !== i) parent[i] = findRoot(parent[i]);
+    return parent[i];
+  };
+
+  const keyToOwner = new Map();
+  allCandidates.forEach((c, i) => {
+    const keys = customerIdentityKeys(c);
+    keys.forEach((k) => {
+      const owner = keyToOwner.get(k);
+      if (owner === undefined) {
+        keyToOwner.set(k, i);
+      } else {
+        const rootA = findRoot(owner);
+        const rootB = findRoot(i);
+        if (rootA !== rootB) parent[rootB] = rootA;
+      }
+    });
+  });
+
+  const candIndexMap = new Map();
+  allCandidates.forEach((c, i) => {
+    candIndexMap.set(String(c._id || c.id), i);
   });
 
   return plots.map((p) => {
-    const key = customerKeyFromPlot(p);
-    let group = groups.get(key) || [];
-    const selfId = String(p._id || p.id || '');
-    if (!group.some((g) => String(g._id) === selfId) && selfId) {
-      group = [{ _id: selfId, plotNumber: p.plotNumber, status: p.status, projectId: p.projectId, bookedBy: p.bookedBy }, ...group];
+    const selfId = String(p._id || p.id);
+    const selfIdx = candIndexMap.get(selfId);
+    let group = [];
+    if (selfIdx !== undefined) {
+      const targetRoot = findRoot(selfIdx);
+      group = allCandidates.filter((_, idx) => findRoot(idx) === targetRoot);
+    } else {
+      group = [p];
     }
+
+    if (typeof options.isAuthorizedForStaff === 'function') {
+      group = group.filter((item) => options.isAuthorizedForStaff(item));
+    }
+
     const seen = new Set();
     const unique = [];
     group.forEach((g) => {
-      const gid = String(g._id);
+      const gid = String(g._id || g.id);
       if (seen.has(gid)) return;
       seen.add(gid);
       unique.push(g);
     });
-    unique.sort((a, b) => String(a.plotNumber).localeCompare(String(b.plotNumber), undefined, { numeric: true }));
-    const slotTotal = unique.reduce((sum, g) => {
-      const parts = String(g.plotNumber ?? '')
-        .split(/[,/&]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-      return sum + Math.max(1, parts.length);
-    }, 0);
+
+    unique.sort((a, b) =>
+      String(a.plotNumber).localeCompare(String(b.plotNumber), undefined, { numeric: true })
+    );
+
     return {
       ...p,
       relatedBookingCount: unique.length,

@@ -58,19 +58,34 @@ function normPhone10(phone) {
   return String(phone).replace(/\D/g, '').slice(-10);
 }
 
+const PLACEHOLDER_PAYMENT_STATUSES = new Set(['', '-', '—', 'n/a', 'na', 'null', 'undefined']);
+const PLACEHOLDER_LOAN_STAGES = new Set(['', '-', '—', 'n/a', 'na', 'null', 'undefined']);
+
 function getEffectivePaymentStatus(plot, lead) {
-  const pStatus = plot.bookedBy?.paymentStatus?.trim();
-  if (pStatus && pStatus !== '-' && pStatus !== '—' && pStatus.toLowerCase() !== 'not paid') return pStatus;
-  const lStatus = lead?.paymentStatus?.trim();
-  if (lStatus && lStatus !== '-' && lStatus !== '—') return lStatus;
+  const raw = plot.bookedBy?.paymentStatus;
+  const pStatus = raw !== undefined && raw !== null ? String(raw).trim() : '';
+  if (pStatus && !PLACEHOLDER_PAYMENT_STATUSES.has(pStatus.toLowerCase())) {
+    return pStatus;
+  }
+  const lRaw = lead?.paymentStatus;
+  const lStatus = lRaw !== undefined && lRaw !== null ? String(lRaw).trim() : '';
+  if (lStatus && !PLACEHOLDER_PAYMENT_STATUSES.has(lStatus.toLowerCase())) {
+    return lStatus;
+  }
   return pStatus || 'Not Paid';
 }
 
 function getEffectiveLoanStage(plot, lead) {
-  const pStage = plot.bookedBy?.loanStage?.trim();
-  if (pStage && pStage !== '-' && pStage !== '—' && pStage.toLowerCase() !== 'not applied') return pStage;
-  const lStage = lead?.loanStage?.trim();
-  if (lStage && lStage !== '-' && lStage !== '—') return lStage;
+  const raw = plot.bookedBy?.loanStage;
+  const pStage = raw !== undefined && raw !== null ? String(raw).trim() : '';
+  if (pStage && !PLACEHOLDER_LOAN_STAGES.has(pStage.toLowerCase())) {
+    return pStage;
+  }
+  const lRaw = lead?.loanStage;
+  const lStage = lRaw !== undefined && lRaw !== null ? String(lRaw).trim() : '';
+  if (lStage && !PLACEHOLDER_LOAN_STAGES.has(lStage.toLowerCase())) {
+    return lStage;
+  }
   return pStage || 'Not Applied';
 }
 
@@ -82,7 +97,13 @@ function customerIdentityKeys(plot) {
   const displayId = String(plot.leadInfo?.displayId || '').trim().toUpperCase();
   if (displayId) keys.push(`d:${displayId}`);
 
-  const leadId = String(plot.bookedBy?.leadId || plot.leadInfo?._id || plot.leadId || '');
+  const leadId = String(
+    plot.bookedBy?.leadId ||
+    plot.leadInfo?._id ||
+    plot.leadId ||
+    plot.pendingApproval?.leadId ||
+    ''
+  );
   if (leadId && isMongoHexId(leadId)) keys.push(`l:${leadId}`);
 
   if (!p10 && !displayId && !leadId) {
@@ -96,6 +117,56 @@ function customerIdentityKeys(plot) {
   return keys;
 }
 
+function isAuthorizedForStaff({
+  plot,
+  staffUserIdStr,
+  staffUserDisplayId,
+  staffLeadIdSet = new Set(),
+  staffPlotIdSet = new Set(),
+}) {
+  if (!staffUserIdStr) return true;
+
+  // 1. Direct plot assignment
+  if (plot.assignedTo && String(plot.assignedTo) === staffUserIdStr) return true;
+
+  // 2. Direct booking ownership
+  if (plot.bookedBy?.staffId && String(plot.bookedBy.staffId) === staffUserIdStr) return true;
+
+  // 3. Pending approval request ownership
+  if (
+    plot.pendingApproval?.requestedBy &&
+    String(plot.pendingApproval.requestedBy) === staffUserIdStr
+  ) {
+    return true;
+  }
+
+  // 4. Staff display ID match
+  if (
+    staffUserDisplayId &&
+    plot.bookedBy?.staffDisplayId &&
+    plot.bookedBy.staffDisplayId.trim().toUpperCase() === staffUserDisplayId.trim().toUpperCase()
+  ) {
+    return true;
+  }
+
+  // 5. Assigned lead (bookedBy.leadId or pendingApproval.leadId or leadInfo._id or plot.leadId)
+  const bLeadId = plot.bookedBy?.leadId ? String(plot.bookedBy.leadId) : '';
+  const pLeadId = plot.pendingApproval?.leadId ? String(plot.pendingApproval.leadId) : '';
+  const infoLeadId = plot.leadInfo?._id ? String(plot.leadInfo._id) : '';
+  const topLeadId = plot.leadId ? String(plot.leadId) : '';
+  if (bLeadId && staffLeadIdSet.has(bLeadId)) return true;
+  if (pLeadId && staffLeadIdSet.has(pLeadId)) return true;
+  if (infoLeadId && staffLeadIdSet.has(infoLeadId)) return true;
+  if (topLeadId && staffLeadIdSet.has(topLeadId)) return true;
+  if (plot.leadInfo?.assignedTo && String(plot.leadInfo.assignedTo) === staffUserIdStr) return true;
+
+  // 6. Legacy plot link
+  const plotIdStr = String(plot._id || plot.id || '');
+  if (plotIdStr && staffPlotIdSet.has(plotIdStr)) return true;
+
+  return false;
+}
+
 /**
  * Main customer-grouped registration query service.
  * Filters first -> resolves identity -> groups customers -> sorts globally -> paginates -> enriches related bookings.
@@ -105,6 +176,16 @@ async function queryCustomerGroupedBookings({ user, query = {}, isStaffOnly = fa
   const staffUserIdStr = user && (user._id || user.id) ? String(user._id || user.id) : '';
 
   // ─── 1. Input Validation ──────────────────────────────────────────
+  if (query.search !== undefined && query.search !== null && typeof query.search !== 'string') {
+    throw new ErrorResponse("Query parameter 'search' must be a scalar string", 400);
+  }
+  const rawBank = query['bookedBy.bank'] || query.bank;
+  if (rawBank !== undefined && rawBank !== null && typeof rawBank !== 'string') {
+    throw new ErrorResponse("Query parameter 'bank' must be a scalar string", 400);
+  }
+  const normalizedSearch = typeof query.search === 'string' ? query.search.trim() : '';
+  const normalizedBank = typeof rawBank === 'string' ? rawBank.trim() : '';
+
   if (query.projectId !== undefined && query.projectId !== null && query.projectId !== '') {
     if (typeof query.projectId !== 'string' || !mongoose.Types.ObjectId.isValid(query.projectId)) {
       throw new ErrorResponse(`Invalid project ID format: ${query.projectId}`, 400);
@@ -233,9 +314,8 @@ async function queryCustomerGroupedBookings({ user, query = {}, isStaffOnly = fa
     baseFilter['bookedBy.paymentMethod'] = paymentMethod;
   }
 
-  const bank = (query['bookedBy.bank'] || query.bank || '').trim();
-  if (bank && bank !== 'All') {
-    baseFilter['bookedBy.bank'] = bank;
+  if (normalizedBank && normalizedBank !== 'All') {
+    baseFilter['bookedBy.bank'] = normalizedBank;
   }
 
   if (dateFrom || dateTo) {
@@ -248,14 +328,19 @@ async function queryCustomerGroupedBookings({ user, query = {}, isStaffOnly = fa
 
   // ─── 3. Staff Database-Level Access Predicate ──────────────────────
   let staffAccessOr = null;
+  let staffLeadIdSet = new Set();
+  let staffPlotIdSet = new Set();
   if (isStaffRole && staffUserIdStr) {
     const staffLeads = await Lead.find({ assignedTo: staffUserIdStr }).select('_id plotId plotIds').lean();
     const staffLeadIds = staffLeads.map((l) => String(l._id));
+    staffLeadIdSet = new Set(staffLeadIds);
+
     const staffPlotIds = [];
     staffLeads.forEach((l) => {
       if (l.plotId) staffPlotIds.push(String(l.plotId));
       (l.plotIds || []).forEach((pid) => pid && staffPlotIds.push(String(pid)));
     });
+    staffPlotIdSet = new Set(staffPlotIds);
 
     staffAccessOr = [
       { assignedTo: new mongoose.Types.ObjectId(staffUserIdStr) },
@@ -275,7 +360,7 @@ async function queryCustomerGroupedBookings({ user, query = {}, isStaffOnly = fa
   }
 
   // ─── 4. Text Search Processing ────────────────────────────────────
-  const rawSearch = (query.search || '').trim();
+  const rawSearch = normalizedSearch;
   let searchOr = [];
   if (rawSearch) {
     const escaped = rawSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -543,17 +628,17 @@ async function queryCustomerGroupedBookings({ user, query = {}, isStaffOnly = fa
   const matchingPlots = enrichedCandidatePlots.filter((p) => {
     const lead = p.leadInfo;
 
-    // Staff authorization scoping safeguard
+    // Staff authorization scoping safeguard: use authoritative isAuthorizedForStaff
     if (isStaffRole && staffUserIdStr) {
-      const isPlotAssigned = p.assignedTo && String(p.assignedTo) === staffUserIdStr;
-      const isBookedByStaff = p.bookedBy?.staffId && String(p.bookedBy.staffId) === staffUserIdStr;
-      const isStaffDisplayMatch =
-        user.displayId &&
-        p.bookedBy?.staffDisplayId &&
-        p.bookedBy.staffDisplayId.toUpperCase() === user.displayId.toUpperCase();
-      const isLeadAssigned = lead?.assignedTo && String(lead.assignedTo) === staffUserIdStr;
-      const isEffectiveMatch = p.effectiveStaffId === staffUserIdStr;
-      if (!isPlotAssigned && !isBookedByStaff && !isStaffDisplayMatch && !isLeadAssigned && !isEffectiveMatch) {
+      if (
+        !isAuthorizedForStaff({
+          plot: p,
+          staffUserIdStr,
+          staffUserDisplayId: user.displayId,
+          staffLeadIdSet,
+          staffPlotIdSet,
+        })
+      ) {
         return false;
       }
     }
@@ -718,7 +803,19 @@ async function queryCustomerGroupedBookings({ user, query = {}, isStaffOnly = fa
   // Enrich sibling bookings ONLY on the paged customer representatives
   const withRelated = await attachRelatedBookings(
     pagedRepresentatives,
-    isStaffRole && staffAccessOr ? { staffAccessOr } : {}
+    isStaffRole && staffAccessOr
+      ? {
+          staffAccessOr,
+          isAuthorizedForStaff: (plot) =>
+            isAuthorizedForStaff({
+              plot,
+              staffUserIdStr,
+              staffUserDisplayId: user.displayId,
+              staffLeadIdSet,
+              staffPlotIdSet,
+            }),
+        }
+      : {}
   );
 
   const paginatedData = withRelated.map((plot, idx) => ({

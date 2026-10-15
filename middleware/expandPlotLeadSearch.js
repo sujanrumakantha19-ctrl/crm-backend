@@ -2,10 +2,16 @@ const asyncHandler = require('./async');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
 const Project = require('../models/Project');
+const ErrorResponse = require('../utils/errorResponse');
 
 /** When searching plots, also match linked leads (Customer ID), assigned staff (Staff ID), and projects. */
 module.exports = asyncHandler(async (req, res, next) => {
-  const raw = req.query.search?.trim();
+  if (req.query.search !== undefined && req.query.search !== null) {
+    if (typeof req.query.search !== 'string') {
+      return next(new ErrorResponse("Query parameter 'search' must be a scalar string", 400));
+    }
+  }
+  const raw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
   if (!raw) return next();
 
   const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

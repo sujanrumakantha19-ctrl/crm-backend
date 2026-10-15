@@ -544,6 +544,7 @@ describe('Registration Search, Filters & Grouped Pagination Hardening', () => {
           phone: '9876543333',
           leadId: String(leadWithPayment._id),
           paymentMethod: 'LOAN',
+          loanStage: null,
         },
       });
 
@@ -752,6 +753,189 @@ describe('Registration Search, Filters & Grouped Pagination Hardening', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.data)).toBe(true);
+    });
+  });
+
+  // ─── 7. Four Reproduced Review Findings Regression Suite ───────────
+  describe('7. Four Reproduced Review Findings Regression Suite', () => {
+    it('1. should preserve explicit "Not Paid" and "Not Applied" on plot even if linked lead is Fully Paid / Sanctioned', async () => {
+      const dualLead = await Lead.create({
+        customerName: 'Dual Plot Owner',
+        phone: '9988776655',
+        displayId: 'L-9988',
+        paymentStatus: 'Fully Paid',
+        loanStage: 'Sanctioned',
+      });
+
+      const plotA = await Plot.create({
+        plotNumber: 991,
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Dual Plot Owner',
+          phone: '9988776655',
+          leadId: dualLead._id,
+          paymentStatus: 'Not Paid',      // Explicit plot status
+          loanStage: 'Not Applied',       // Explicit plot loan stage
+          paymentMethod: 'CASH',
+        },
+      });
+
+      const plotB = await Plot.create({
+        plotNumber: 992,
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Dual Plot Owner',
+          phone: '9988776655',
+          leadId: dualLead._id,
+          paymentStatus: 'Fully Paid',
+          loanStage: 'Sanctioned',
+          paymentMethod: 'LOAN',
+          bank: 'HDFC Bank',
+        },
+      });
+
+      // Filter for Not Paid: plotA MUST be found and NOT overridden to Fully Paid
+      const resNotPaid = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&paymentStatusFilter=Not Paid&search=9988776655')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(resNotPaid.status).toBe(200);
+      expect(resNotPaid.body.total).toBe(1);
+      const row = resNotPaid.body.data[0];
+      expect(row.effectivePaymentStatus).toBe('Not Paid');
+      expect(row.effectiveLoanStage).toBe('Not Applied');
+
+      // Filter for Not Applied: plotA MUST be found and NOT overridden to Sanctioned
+      const resNotApplied = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&loanStageFilter=Not Applied&search=9988776655')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(resNotApplied.status).toBe(200);
+      expect(resNotApplied.body.total).toBe(1);
+      expect(resNotApplied.body.data[0].effectiveLoanStage).toBe('Not Applied');
+    });
+
+    it('2. should relate two plots linked to the same lead even when phone numbers differ', async () => {
+      const sharedLead = await Lead.create({
+        customerName: 'Diff Phone Customer',
+        phone: '9888800001',
+        displayId: 'L-5544',
+      });
+
+      const p1 = await Plot.create({
+        plotNumber: 881,
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Diff Phone Customer',
+          phone: '9888800001', // Phone A
+          leadId: sharedLead._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      const p2 = await Plot.create({
+        plotNumber: 882,
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Diff Phone Customer',
+          phone: '9888800002', // Phone B (different phone!)
+          leadId: sharedLead._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      const res = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&search=L-5544')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(1);
+      expect(res.body.totalPlots).toBe(2);
+      expect(res.body.data.length).toBe(1);
+
+      const customerRow = res.body.data[0];
+      expect(customerRow.relatedBookingCount).toBe(2);
+      expect(customerRow.relatedBookings.length).toBe(2);
+      const plotNumbers = customerRow.relatedBookings.map((b) => String(b.plotNumber));
+      expect(plotNumbers).toContain('881');
+      expect(plotNumbers).toContain('882');
+    });
+
+    it('3. should preserve staff access through pendingApproval.requestedBy and legacy links', async () => {
+      // Create plot where staff1 only has ownership through pendingApproval.requestedBy
+      const reqPlot = await Plot.create({
+        plotNumber: 771,
+        projectId: projectA._id,
+        status: 'Booked',
+        pendingApproval: {
+          requestedBy: staff1User._id,
+          status: 'pending',
+        },
+        bookedBy: {
+          name: 'Requested Owner Cust',
+          phone: '9777700001',
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Create plot where staff1 only has access through lead legacy plotId
+      const legacyPlot = await Plot.create({
+        plotNumber: 772,
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Legacy Linked Cust',
+          phone: '9777700002',
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      const staff1LegacyLead = await Lead.create({
+        customerName: 'Legacy Linked Cust',
+        phone: '9777700002',
+        displayId: 'L-7722',
+        assignedTo: staff1User._id,
+        plotId: legacyPlot._id,
+      });
+
+      const resStaff = await request(app)
+        .get('/api/v1/plots/my-bookings?groupBy=customer&status=Booked')
+        .set('Authorization', `Bearer ${staff1Token}`);
+
+      expect(resStaff.status).toBe(200);
+      const returnedPlotNumbers = resStaff.body.data.flatMap((row) =>
+        (row.relatedBookings || []).map((b) => String(b.plotNumber))
+      );
+
+      // Both requestedBy and legacy plotId must be accessible to staff1
+      expect(returnedPlotNumbers).toContain('771');
+      expect(returnedPlotNumbers).toContain('772');
+    });
+
+    it('4. should reject array/object repeated parameters with HTTP 400', async () => {
+      // Repeated search: ?search=a&search=b
+      const resSearch = await request(app)
+        .get('/api/v1/plots?search=a&search=b')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(resSearch.status).toBe(400);
+      expect(resSearch.body.error).toMatch(/must be a scalar string/i);
+
+      // Repeated bank: ?bank=HDFC&bank=SBI
+      const resBank = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&bank=HDFC&bank=SBI')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(resBank.status).toBe(400);
+      expect(resBank.body.error).toMatch(/must be a scalar string/i);
     });
   });
 });
