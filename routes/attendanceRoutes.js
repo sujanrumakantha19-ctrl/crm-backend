@@ -10,6 +10,9 @@ const {
   getAttendanceByStaff,
   getAttendanceByDate,
   getTodayAttendance,
+  getTodayPresence,
+  getDailyAttendance,
+  setAttendanceOverride,
 } = require('../controllers/attendanceController');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -25,6 +28,9 @@ const scopeStaffAttendance = (req, res, next) => {
 };
 
 // Specific routes BEFORE parameterized routes
+router.route('/presence/today').get(protect, getTodayPresence);
+router.route('/daily').get(protect, getDailyAttendance);
+router.route('/override').post(protect, authorize('admin'), setAttendanceOverride);
 router.route('/today').get(protect, getTodayAttendance);
 router.route('/staff/:staffId').get(protect, getAttendanceByStaff);
 router.route('/date/:date').get(protect, getAttendanceByDate);

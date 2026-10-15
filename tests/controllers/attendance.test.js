@@ -184,4 +184,112 @@ describe('Attendance Controller', () => {
       expect(count).toBe(1);
     });
   });
+
+  describe('GET /api/v1/attendance/presence/today', () => {
+    it('should return complete active staff roster with presence status', async () => {
+      const { getTodayDateStringIST } = require('../../utils/dateIST');
+      const today = getTodayDateStringIST();
+
+      await Attendance.create({
+        staffId: staffUser._id,
+        staffName: staffUser.name,
+        date: today,
+        checkIn: '09:15 AM',
+        status: 'Present',
+        role: 'staff',
+      });
+
+      const res = await request(app)
+        .get('/api/v1/attendance/presence/today')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.summary.presentCount).toBeGreaterThanOrEqual(1);
+      const staffMember = res.body.data.find(s => String(s.staffId) === String(staffUser._id));
+      expect(staffMember).toBeDefined();
+      expect(staffMember.presence).toBe('Present');
+      expect(staffMember.firstCheckIn).toBe('09:15 AM');
+    });
+  });
+
+  describe('GET /api/v1/attendance/daily', () => {
+    it('should return aggregated daily attendance outcome for staff', async () => {
+      await Attendance.create([
+        {
+          staffId: staffUser._id,
+          staffName: staffUser.name,
+          date: '2024-06-10',
+          checkIn: '09:00 AM',
+          checkOut: '12:00 PM',
+          duration: '3h 0m',
+          status: 'Present',
+          role: 'staff',
+        },
+        {
+          staffId: staffUser._id,
+          staffName: staffUser.name,
+          date: '2024-06-10',
+          checkIn: '02:00 PM',
+          checkOut: '05:00 PM',
+          duration: '3h 0m',
+          status: 'Present',
+          role: 'staff',
+        },
+      ]);
+
+      const res = await request(app)
+        .get('/api/v1/attendance/daily?date=2024-06-10')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      const record = res.body.data.find(r => String(r.staffId) === String(staffUser._id));
+      expect(record).toBeDefined();
+      // 3h + 3h = 6h => Half Day
+      expect(record.status).toBe('Half Day');
+      expect(record.totalMinutes).toBe(360);
+      expect(record.formattedDuration).toBe('6h 0m');
+    });
+  });
+
+  describe('POST /api/v1/attendance/override', () => {
+    it('should allow admin to set and remove daily attendance override', async () => {
+      // 1. Set override
+      const res = await request(app)
+        .post('/api/v1/attendance/override')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          staffId: staffUser._id,
+          date: '2024-06-10',
+          status: 'Present',
+          notes: 'Special admin approval for on-duty work',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.status).toBe('Present');
+
+      // Check daily endpoint reflects the override
+      const dailyRes = await request(app)
+        .get('/api/v1/attendance/daily?date=2024-06-10')
+        .set('Authorization', `Bearer ${adminToken}`);
+      const record = dailyRes.body.data.find(r => String(r.staffId) === String(staffUser._id));
+      expect(record.status).toBe('Present');
+      expect(record.isOverridden).toBe(true);
+      expect(record.overrideNotes).toBe('Special admin approval for on-duty work');
+
+      // 2. Remove override
+      const removeRes = await request(app)
+        .post('/api/v1/attendance/override')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          staffId: staffUser._id,
+          date: '2024-06-10',
+          status: 'Remove',
+        });
+      expect(removeRes.status).toBe(200);
+      expect(removeRes.body.data).toBeNull();
+    });
+  });
 });
