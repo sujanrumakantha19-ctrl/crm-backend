@@ -1,6 +1,14 @@
 const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
 const Task = require('../models/Task');
+const { getTodayDateStringIST } = require('../utils/dateIST');
+
+function toDateStr(d) {
+  if (!d) return '';
+  if (typeof d === 'string') return d.slice(0, 10);
+  if (d instanceof Date) return d.toISOString().slice(0, 10);
+  return '';
+}
 
 // Staff users may only access tasks assigned to them
 function staffUid(req) {
@@ -134,18 +142,37 @@ exports.getTask = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/tasks
 // @access  Private
 exports.createTask = asyncHandler(async (req, res, next) => {
-  const { title, description, status, priority, assignee, assigneeInitials, dueDate, dueTime, project, comments } = req.body;
+  let { title, description, status, priority, assignee, assigneeInitials, dueDate, dueTime, project, comments } = req.body;
+
+  const todayIST = getTodayDateStringIST();
+
+  if (dueDate) {
+    const dueStr = toDateStr(dueDate);
+    if (dueStr && dueStr < todayIST) {
+      return next(new ErrorResponse('Task deadline cannot be in the past', 400));
+    }
+  }
+
+  // Staff creation constraints: forced to 'To Do' and self-assigned
+  if (req.user && req.user.role === 'staff') {
+    status = 'To Do';
+    assignee = req.user.id || req.user._id;
+    assigneeInitials = req.user.initials || 'ST';
+  }
+
+  const mongoose = require('mongoose');
+  const validProject = (project && mongoose.Types.ObjectId.isValid(project)) ? project : undefined;
 
   const task = await Task.create({
     title,
     description,
-    status,
-    priority,
+    status: status || 'To Do',
+    priority: priority || 'Medium',
     assignee,
     assigneeInitials,
     dueDate,
     dueTime,
-    project,
+    project: validProject,
     comments,
   });
 
@@ -188,6 +215,17 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Task not found with id of ${req.params.id}`, 404));
   }
 
+  const todayIST = getTodayDateStringIST();
+
+  // Validate deadline if dueDate is provided and modified to a new date
+  if (req.body.dueDate !== undefined) {
+    const newDueStr = toDateStr(req.body.dueDate);
+    const oldDueStr = toDateStr(task.dueDate);
+    if (newDueStr && newDueStr !== oldDueStr && newDueStr < todayIST) {
+      return next(new ErrorResponse('Task deadline cannot be in the past', 400));
+    }
+  }
+
   // Staff may only update tasks assigned to them (issue 30). Admins can update any task.
   if (req.user && req.user.role === 'staff') {
     const uid = String(req.user.id || (req.user._id || ''));
@@ -195,6 +233,21 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
     if (!assigneeId || assigneeId !== uid) {
       return next(new ErrorResponse('You are not allowed to update this task', 403));
     }
+
+    if (task.status === 'Done') {
+      return next(new ErrorResponse('Completed tasks cannot be modified by staff', 403));
+    }
+
+    if (req.body.status) {
+      if (req.body.status === 'Done') {
+        return next(new ErrorResponse('Only administrators can mark tasks as Done', 403));
+      }
+      const allowedStaffStatuses = ['To Do', 'In Progress', 'In Review'];
+      if (!allowedStaffStatuses.includes(req.body.status)) {
+        return next(new ErrorResponse(`Invalid status for staff: ${req.body.status}`, 400));
+      }
+    }
+
     // Staff cannot reassign a task or change its project/priority
     delete req.body.assignee;
     delete req.body.assigneeInitials;

@@ -335,6 +335,9 @@ exports.addMember = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('User is already a member of this group', 400));
   }
 
+  // Remove user from any other group first so a user belongs to at most one group
+  await Group.updateMany({ _id: { $ne: group._id }, members: userId }, { $pull: { members: userId } });
+
   group.members.push(userId);
   await group.save();
 

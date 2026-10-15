@@ -6,7 +6,7 @@ const Lead = require('../models/Lead');
 const User = require('../models/User');
 const Plot = require('../models/Plot');
 const ActivityLog = require('../models/ActivityLog');
-const { countUniqueCustomers } = require('../utils/customerMetrics');
+const { countUniqueCustomers, buildLeadSearchConditions } = require('../utils/customerMetrics');
 
 // Follow-up outcome classification. Negative outcomes are matched on full words
 // (word boundaries), so partial/unrelated matches (e.g. "Wrong project but
@@ -73,7 +73,8 @@ exports.getLeads = asyncHandler(async (req, res, next) => {
   let data = res.advancedResults.data || [];
   let count = res.advancedResults.count;
 
-  if (req.query.groupBy === 'customer' || (req.query.status === 'Customer' && req.query.groupBy !== 'none')) {
+  // Defensive fallback if advancedResults did not aggregate pre-pagination
+  if ((req.query.groupBy === 'customer' || (req.query.status === 'Customer' && req.query.groupBy !== 'none')) && (!data[0] || data[0].relatedBookingCount === undefined)) {
     data = collapseLeadsByCustomer(data);
     count = data.length;
   }
@@ -99,47 +100,13 @@ exports.getLeadCounts = asyncHandler(async (req, res) => {
     match.sourceId = new mongoose.Types.ObjectId(sourceId);
   }
 
-  // Handle search filter if provided (name, phone, lead id, staff id)
+  // Handle search filter if provided (name, phone, lead id, staff id, bank, email, etc.)
   let searchFilter = null;
   if (search && search.trim()) {
-    const rawSearch = search.trim();
-    const escapedSearch = rawSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const flexibleSearch = escapedSearch.split('').join('\\s*');
-
-    const orConditions = [
-      { customerName: { $regex: flexibleSearch, $options: 'i' } },
-      { phone: { $regex: escapedSearch, $options: 'i' } },
-      { displayId: { $regex: escapedSearch, $options: 'i' } },
-      { assignedToName: { $regex: flexibleSearch, $options: 'i' } },
-      { assignedToDisplayId: { $regex: escapedSearch, $options: 'i' } },
-    ];
-
-    if (mongoose.Types.ObjectId.isValid(rawSearch)) {
-      orConditions.push({ _id: new mongoose.Types.ObjectId(rawSearch) });
+    const orConditions = buildLeadSearchConditions(search);
+    if (orConditions.length > 0) {
+      searchFilter = { $or: orConditions };
     }
-
-    const numMatch = rawSearch.match(/^0*(\d+)$/);
-    if (numMatch) {
-      const num = parseInt(numMatch[1], 10);
-      orConditions.push({ displayId: `L-${num}` });
-      orConditions.push({ displayId: `PROJ-${num}` });
-      orConditions.push({ displayId: `STAFF-${num}` });
-      orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
-    }
-
-    const leadOrCustMatch = rawSearch.match(/^(?:l|c|cust|customer)[\s-]*(\d+)$/i);
-    if (leadOrCustMatch) {
-      const num = parseInt(leadOrCustMatch[1], 10);
-      orConditions.push({ displayId: `L-${num}` });
-    }
-
-    const staffMatch = rawSearch.match(/^(?:staff|emp)[\s-]*(\d+)$/i);
-    if (staffMatch) {
-      const num = parseInt(staffMatch[1], 10);
-      orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
-    }
-
-    searchFilter = { $or: orConditions };
   }
 
   const pipeline = [];

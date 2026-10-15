@@ -91,7 +91,13 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
   }
 
   // Search
-  if (req.query.search && searchFields && searchFields.length > 0) {
+  if (req.query.search && model.modelName === 'Lead') {
+    const { buildLeadSearchConditions } = require('../utils/customerMetrics');
+    const conditions = buildLeadSearchConditions(req.query.search);
+    if (conditions.length > 0) {
+      parsedQuery.$or = conditions;
+    }
+  } else if (req.query.search && searchFields && searchFields.length > 0) {
     const rawSearch = req.query.search.trim();
     const escapedSearch = rawSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // Flexible space matching (BUG-17): e.g. "templecity" matches "Temple City"
@@ -222,14 +228,84 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
   const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
   const startIndex = (page - 1) * limit;
   const endIndex = page * limit;
-  const total = await model.countDocuments(parsedQuery);
 
   const useProjectStatusPriority =
     req.query.sort === 'statusPriority' && model.modelName === 'Project';
 
+  const useLeadCustomerGrouping =
+    model.modelName === 'Lead' &&
+    (req.query.groupBy === 'customer' || (req.query.status === 'Customer' && req.query.groupBy !== 'none'));
+
+  let total;
   let results;
 
-  if (useProjectStatusPriority) {
+  if (useLeadCustomerGrouping) {
+    const { getCustomerIdentityExpression } = require('../utils/customerMetrics');
+    const groupKeyExpr = (req.query.status === 'Customer')
+      ? getCustomerIdentityExpression()
+      : {
+          $cond: [
+            { $eq: ['$status', 'Customer'] },
+            getCustomerIdentityExpression(),
+            { $concat: ['lead:', { $toString: '$_id' }] }
+          ]
+        };
+
+    const sortStage = (req.query.sort === 'createdAt' || req.query.sort === 'dateAdded')
+      ? { latestCreatedAt: 1, _id: 1 }
+      : { latestCreatedAt: -1, _id: 1 };
+
+    const aggResult = await model.aggregate([
+      { $match: parsedQuery },
+      {
+        $group: {
+          _id: groupKeyExpr,
+          firstDoc: { $first: '$$ROOT' },
+          latestCreatedAt: { $max: { $ifNull: ['$createdAt', '$dateAdded'] } },
+          relatedBookingCount: { $sum: 1 },
+          relatedLeadDisplayIds: { $addToSet: '$displayId' },
+          relatedLeadIds: { $addToSet: '$_id' },
+          assignedTo: { $max: '$assignedTo' },
+          assignedToName: { $max: '$assignedToName' },
+          assignedToDisplayId: { $max: '$assignedToDisplayId' },
+        }
+      },
+      {
+        $facet: {
+          metadata: [{ $count: 'total' }],
+          data: [
+            { $sort: sortStage },
+            { $skip: startIndex },
+            { $limit: limit },
+          ]
+        }
+      }
+    ]);
+
+    total = aggResult[0]?.metadata[0]?.total || 0;
+    const rawGroups = aggResult[0]?.data || [];
+
+    const docs = rawGroups.map(g => {
+      const doc = g.firstDoc;
+      doc.id = String(doc._id);
+      doc.relatedBookingCount = g.relatedBookingCount;
+      doc.plotBookingCount = g.relatedBookingCount;
+      doc.relatedLeadDisplayIds = (g.relatedLeadDisplayIds || []).filter(Boolean);
+      doc.relatedLeadIds = (g.relatedLeadIds || []).map(id => String(id));
+      doc.groupedLeadIds = doc.relatedLeadIds;
+      if (!doc.assignedTo && g.assignedTo) doc.assignedTo = g.assignedTo;
+      if (!doc.assignedToName && g.assignedToName) doc.assignedToName = g.assignedToName;
+      if (!doc.assignedToDisplayId && g.assignedToDisplayId) doc.assignedToDisplayId = g.assignedToDisplayId;
+      return doc;
+    });
+
+    if (populate && docs.length > 0) {
+      await model.populate(docs, populate);
+    }
+
+    results = docs;
+  } else if (useProjectStatusPriority) {
+    total = await model.countDocuments(parsedQuery);
     const statusRankSwitch = {
       $switch: {
         branches: [
@@ -268,6 +344,7 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
       results = ids.map((id) => byId.get(String(id))).filter(Boolean);
     }
   } else {
+    total = await model.countDocuments(parsedQuery);
     // Sort
     if (req.query.sort) {
       const sortBy = req.query.sort.split(',').join(' ');

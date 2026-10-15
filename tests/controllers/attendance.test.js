@@ -366,6 +366,50 @@ describe('Attendance Controller', () => {
       const detailLines = detailsRes.text.trim().split('\n');
       expect(detailLines.length).toBe(3); // Header + 2 sessions
     });
+
+    it('should return 409 when marking Absent for staff with active running session unless confirmed', async () => {
+      // Create an open active session
+      await Attendance.create({
+        staffId: staffUser._id,
+        staffName: staffUser.name,
+        date: '2024-07-01',
+        checkIn: '09:30',
+        checkOut: '-',
+        status: 'Present',
+        role: 'staff',
+      });
+
+      // Attempting to set override status to Absent without confirmation
+      const res1 = await request(app)
+        .post('/api/v1/attendance/override')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          staffId: staffUser._id,
+          date: '2024-07-01',
+          status: 'Absent',
+        });
+      expect(res1.status).toBe(409);
+      expect(res1.body.code).toBe('ACTIVE_SESSION_OVERRIDE_CONFIRMATION_REQUIRED');
+
+      // Attempting with confirmActiveOverride: true
+      const res2 = await request(app)
+        .post('/api/v1/attendance/override')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          staffId: staffUser._id,
+          date: '2024-07-01',
+          status: 'Absent',
+          confirmActiveOverride: true,
+        });
+      expect(res2.status).toBe(200);
+      expect(res2.body.data.status).toBe('Absent');
+
+      // Verify the running session still exists and was not corrupted
+      const session = await Attendance.findOne({ staffId: staffUser._id, date: '2024-07-01', checkOut: '-' });
+      expect(session).not.toBeNull();
+      expect(session.checkIn).toBe('09:30');
+    });
   });
 });
+
 

@@ -179,4 +179,32 @@ describe('AdvancedResults Middleware', () => {
       expect(res.status).toBe(404);
     });
   });
+
+  describe('Customer Grouping Pre-Pagination', () => {
+    it('should group leads by canonical customer identity before pagination when groupBy=customer', async () => {
+      // Create 3 leads: 2 share the same 10-digit phone number, 1 has a different phone number
+      await Lead.create([
+        { customerName: 'Ramesh Kumar', phone: '9876543210', email: 'ramesh1@test.com', status: 'Customer' },
+        { customerName: 'Ramesh K', phone: '9876543210', email: 'ramesh2@test.com', status: 'Customer' },
+        { customerName: 'Suresh Raina', phone: '9123456789', email: 'suresh@test.com', status: 'Customer' },
+      ]);
+
+      const res = await request(app)
+        .get('/api/v1/leads?groupBy=customer&status=Customer')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      // Even though there are 3 raw leads, total unique customers must be 2
+      expect(res.body.total).toBe(2);
+      expect(res.body.count).toBe(2);
+      expect(res.body.data.length).toBe(2);
+
+      // Verify the grouped customer has groupedLeadIds and plotBookingCount
+      const ramesh = res.body.data.find(c => c.phone === '9876543210');
+      expect(ramesh).toBeDefined();
+      expect(ramesh.plotBookingCount).toBe(2);
+      expect(ramesh.groupedLeadIds.length).toBe(2);
+    });
+  });
 });
+

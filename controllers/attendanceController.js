@@ -420,7 +420,7 @@ exports.getDailyAttendance = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/attendance/override
 // @access  Private (Admin only)
 exports.setAttendanceOverride = asyncHandler(async (req, res, next) => {
-  const { staffId, date, status, notes } = req.body;
+  const { staffId, date, status, notes, confirmActiveOverride } = req.body;
 
   if (!staffId || !date) {
     return next(new ErrorResponse('Please provide staffId and date', 400));
@@ -439,6 +439,28 @@ exports.setAttendanceOverride = asyncHandler(async (req, res, next) => {
   const validStatuses = ['Present', 'Half Day', 'Absent'];
   if (!validStatuses.includes(status)) {
     return next(new ErrorResponse(`Invalid status: ${status}. Must be one of ${validStatuses.join(', ')}`, 400));
+  }
+
+  // Active check-in override safeguard: if marking Absent for a staff member who currently has an open session on that date
+  if (status === 'Absent') {
+    const activeSession = await Attendance.findOne({
+      $or: [{ staffId }, { userId: staffId }],
+      date,
+      $or: [{ checkOut: null }, { checkOut: '' }, { checkOut: '-' }, { checkOut: { $exists: false } }]
+    });
+
+    if (activeSession && confirmActiveOverride !== true) {
+      return res.status(409).json({
+        success: false,
+        code: 'ACTIVE_SESSION_OVERRIDE_CONFIRMATION_REQUIRED',
+        message: 'This staff member is currently checked in. Marking this day Absent will override attendance without checking them out. Confirmation is required.',
+        data: {
+          activeSessionId: activeSession._id,
+          checkIn: activeSession.checkIn,
+          date: activeSession.date
+        }
+      });
+    }
   }
 
   const override = await AttendanceOverride.findOneAndUpdate(

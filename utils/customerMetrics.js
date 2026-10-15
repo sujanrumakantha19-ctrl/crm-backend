@@ -99,8 +99,64 @@ function getPlotBuyerIdentityExpression() {
   };
 }
 
+/**
+ * Build unified search $or conditions for Leads
+ */
+function buildLeadSearchConditions(rawSearch) {
+  if (!rawSearch || typeof rawSearch !== 'string' || !rawSearch.trim()) {
+    return [];
+  }
+  const search = rawSearch.trim();
+  const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const flexibleSearch = escapedSearch.split('').join('\\s*');
+
+  const orConditions = [
+    { customerName: { $regex: flexibleSearch, $options: 'i' } },
+    { phone: { $regex: escapedSearch, $options: 'i' } },
+    { displayId: { $regex: escapedSearch, $options: 'i' } },
+    { assignedToName: { $regex: flexibleSearch, $options: 'i' } },
+    { assignedToDisplayId: { $regex: escapedSearch, $options: 'i' } },
+    { email: { $regex: escapedSearch, $options: 'i' } },
+    { bank: { $regex: escapedSearch, $options: 'i' } },
+    { bankFollowerName: { $regex: flexibleSearch, $options: 'i' } },
+    { bankFollowerPhone: { $regex: escapedSearch, $options: 'i' } },
+    { city: { $regex: escapedSearch, $options: 'i' } },
+    { source: { $regex: escapedSearch, $options: 'i' } },
+    { sourceType: { $regex: escapedSearch, $options: 'i' } },
+  ];
+
+  const mongoose = require('mongoose');
+  if (mongoose.Types.ObjectId.isValid(search)) {
+    orConditions.push({ _id: new mongoose.Types.ObjectId(search) });
+  }
+
+  const numMatch = search.match(/^0*(\d+)$/);
+  if (numMatch) {
+    const num = parseInt(numMatch[1], 10);
+    orConditions.push({ displayId: `L-${num}` });
+    orConditions.push({ displayId: `PROJ-${num}` });
+    orConditions.push({ displayId: `STAFF-${num}` });
+    orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
+  }
+
+  const leadOrCustMatch = search.match(/^(?:l|c|cust|customer)[\s-]*(\d+)$/i);
+  if (leadOrCustMatch) {
+    const num = parseInt(leadOrCustMatch[1], 10);
+    orConditions.push({ displayId: `L-${num}` });
+  }
+
+  const staffMatch = search.match(/^(?:staff|emp)[\s-]*(\d+)$/i);
+  if (staffMatch) {
+    const num = parseInt(staffMatch[1], 10);
+    orConditions.push({ assignedToDisplayId: `STAFF-${num}` });
+  }
+
+  return orConditions;
+}
+
 module.exports = {
   countUniqueCustomers,
   getCustomerIdentityExpression,
   getPlotBuyerIdentityExpression,
+  buildLeadSearchConditions,
 };

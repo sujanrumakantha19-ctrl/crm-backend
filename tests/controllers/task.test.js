@@ -196,4 +196,66 @@ describe('Task Controller', () => {
       expect(res.body.data.evilField).toBeUndefined();
     });
   });
+
+  describe('Task Status Role Restrictions & Deadline Validation', () => {
+    it('should reject past deadline on task creation with 400', async () => {
+      const res = await request(app)
+        .post('/api/v1/tasks')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ title: 'Past Deadline Task', dueDate: '2020-01-01' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Task deadline cannot be in the past/i);
+    });
+
+    it('should allow current or future deadline on task creation', async () => {
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 5);
+      const dueDateStr = futureDate.toISOString().split('T')[0];
+
+      const res = await request(app)
+        .post('/api/v1/tasks')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ title: 'Future Deadline Task', dueDate: dueDateStr });
+      expect(res.status).toBe(201);
+      expect(res.body.data.dueDate).toContain(dueDateStr);
+    });
+
+    it('should prevent staff from marking task Done with 403', async () => {
+      const task = await Task.create({ title: 'Staff Task', assignee: staffUser._id, status: 'In Progress' });
+      const res = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ status: 'Done' });
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/Only administrators can mark tasks as Done/i);
+    });
+
+    it('should prevent staff from modifying an already Done task with 403', async () => {
+      const task = await Task.create({ title: 'Completed Task', assignee: staffUser._id, status: 'Done' });
+      const res = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ status: 'In Progress' });
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/Completed tasks cannot be modified by staff/i);
+    });
+
+    it('should allow admin to mark task as Done and reopen Done task', async () => {
+      const task = await Task.create({ title: 'Admin Controlled Task', assignee: staffUser._id, status: 'In Review' });
+      const res1 = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'Done' });
+      expect(res1.status).toBe(200);
+      expect(res1.body.data.status).toBe('Done');
+
+      const res2 = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'In Progress' });
+      expect(res2.status).toBe(200);
+      expect(res2.body.data.status).toBe('In Progress');
+    });
+  });
 });
+
