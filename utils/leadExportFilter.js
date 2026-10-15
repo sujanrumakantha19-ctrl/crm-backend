@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const mongoSanitize = require('mongo-sanitize');
+const { buildLeadSearchConditions } = require('./customerMetrics');
 
 /**
  * Build a Lead MongoDB filter from export/list query params (matches GET /leads filters).
@@ -46,10 +47,16 @@ function buildLeadExportFilter(rawQuery = {}, defaults = {}, reqUser = null) {
   }
 
   if (query.search && String(query.search).trim()) {
-    const escaped = String(query.search)
-      .trim()
-      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    filter.customerName = { $regex: escaped, $options: 'i' };
+    const searchConditions = buildLeadSearchConditions(String(query.search).trim());
+    if (searchConditions.length > 0) {
+      if (filter.$or) {
+        filter.$and = filter.$and || [];
+        filter.$and.push({ $or: filter.$or }, { $or: searchConditions });
+        delete filter.$or;
+      } else {
+        filter.$or = searchConditions;
+      }
+    }
   }
 
   const gte = query['createdAt[gte]'] || (query.createdAt && query.createdAt.$gte);

@@ -122,11 +122,8 @@ exports.updateUser = asyncHandler(async (req, res, next) => {
 
   // Sync Group membership if groupId was specified
   if (req.body.groupId !== undefined) {
-    const Group = require('../models/Group');
-    await Group.updateMany({ members: user._id }, { $pull: { members: user._id } });
-    if (req.body.groupId) {
-      await Group.findByIdAndUpdate(req.body.groupId, { $addToSet: { members: user._id } });
-    }
+    const { assignUserToGroup } = require('../services/groupMembershipService');
+    await assignUserToGroup(user._id, req.body.groupId || null);
   }
 
   res.status(200).json({

@@ -93,7 +93,7 @@ describe('Plot Controller Coverage', () => {
       const res = await request(app)
         .put(`/api/v1/plots/${plot._id}/book`)
         .set('Authorization', `Bearer ${staff.token}`)
-        .send({ customerName: 'Notif Customer', phone: '999' });
+        .send({ customerName: 'Notif Customer', phone: '999', expectedRegistrationDate: '2026-12-31' });
       expect(res.status).toBe(200);
       expect(res.body.data.status).toBe('Pending');
     });

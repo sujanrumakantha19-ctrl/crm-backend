@@ -110,8 +110,8 @@ exports.getPlots = asyncHandler(async (req, res, next) => {
     const lid = plot.bookedBy?.leadId || plot.pendingApproval?.leadId || plot.leadId;
     let lead = lid ? leadMap.get(String(lid)) : null;
     if (!lead) lead = plotIdToLead.get(String(plot._id));
-
-    const plotObj = plot.toObject ? plot.toObject() : { ...plot };
+    const plotObj = plot.toObject ? plot.toObject({ virtuals: true }) : { ...plot };
+    if (!plotObj.id && plotObj._id) plotObj.id = plotObj._id;
 
     const assignedUser = plotObj.assignedTo ? staffUserMap.get(String(plotObj.assignedTo)) : null;
     const bookedByUser = plotObj.bookedBy?.staffId ? staffUserMap.get(String(plotObj.bookedBy.staffId)) : null;

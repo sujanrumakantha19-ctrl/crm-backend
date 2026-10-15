@@ -92,43 +92,66 @@ exports.getAttendance = asyncHandler(async (req, res, next) => {
 
 // @desc    Create attendance record
 // @route   POST /api/v1/attendance
+// @desc    Create attendance record
+// @route   POST /api/v1/attendance
 // @access  Private
 // Each check-in creates a new record. Enforces at most one active session per staff.
 exports.createAttendance = asyncHandler(async (req, res, next) => {
   const uid = staffUid(req);
-  const targetStaffId = uid || req.body.staffId;
+  const targetStaffId = (req.user && req.user.role === 'staff') ? uid : (req.body.staffId || uid);
 
   if (!targetStaffId) {
     return next(new ErrorResponse('Please provide staffId', 400));
   }
 
-  const todayDate = req.body.date || getTodayDateStringIST();
-  req.body.date = todayDate;
-
-  // For normal staff punch: enforce staff ID and default server IST time if checkIn not provided
-  if (req.user && req.user.role === 'staff') {
-    req.body.staffId = uid;
-    if (!req.body.checkIn) {
-      const nowIST = new Date();
-      req.body.checkIn = nowIST.toLocaleTimeString('en-US', {
-        hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata',
-      });
-    }
-    req.body.status = req.body.status || 'Present';
-    delete req.body.duration;
-    delete req.body.checkOut;
+  const User = require('../models/User');
+  const staffMember = await User.findById(targetStaffId);
+  if (!staffMember) {
+    return next(new ErrorResponse(`Staff member not found with id of ${targetStaffId}`, 404));
   }
 
-  // Prevent duplicate concurrent check-ins:
-  // If an unclosed session already exists with the EXACT same checkIn time, reject duplicate punch.
-  if (req.user && req.user.role !== 'admin') {
-    const duplicateActive = await Attendance.findOne({
+  const now = new Date();
+  const nowISTString = now.toLocaleTimeString('en-US', {
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata',
+  });
+  const todayIST = getTodayDateStringIST();
+
+  if (req.user && req.user.role === 'staff') {
+    req.body.staffId = uid;
+    req.body.staffName = staffMember.name;
+    req.body.date = todayIST;
+    req.body.checkIn = nowISTString;
+    req.body.checkInTime = now;
+    req.body.status = 'Present';
+    req.body.isActive = true;
+    delete req.body.duration;
+    delete req.body.checkOut;
+    delete req.body.checkOutTime;
+  } else {
+    req.body.date = req.body.date || todayIST;
+    req.body.staffName = req.body.staffName || staffMember.name;
+    req.body.status = req.body.status || 'Present';
+    if (req.body.status === 'Absent') {
+      req.body.isActive = false;
+    } else {
+      req.body.checkIn = req.body.checkIn || nowISTString;
+      req.body.checkInTime = req.body.checkInTime || now;
+      const isClosed = req.body.checkOut && req.body.checkOut !== '-' && req.body.checkOut !== '—';
+      req.body.isActive = !isClosed;
+      if (isClosed && !req.body.checkOutTime) {
+        req.body.checkOutTime = now;
+      }
+    }
+  }
+
+  // Database-backed check: enforce at most one active session per staff member
+  if (req.body.isActive) {
+    const activeSession = await Attendance.findOne({
       $and: [
         { $or: [{ staffId: targetStaffId }, { userId: targetStaffId }] },
-        { date: todayDate },
-        { checkIn: req.body.checkIn },
         {
           $or: [
+            { isActive: true },
             { checkOut: { $exists: false } },
             { checkOut: null },
             { checkOut: '' },
@@ -139,19 +162,27 @@ exports.createAttendance = asyncHandler(async (req, res, next) => {
       ],
     });
 
-    if (duplicateActive) {
+    if (activeSession) {
       return next(
-        new ErrorResponse('Duplicate active check-in detected for this time. Please check out first.', 400)
+        new ErrorResponse('Active attendance session already exists for this staff member. Please check out first.', 400)
       );
     }
   }
 
-  const attendance = await Attendance.create(req.body);
-
-  res.status(201).json({
-    success: true,
-    data: attendance,
-  });
+  try {
+    const attendance = await Attendance.create(req.body);
+    res.status(201).json({
+      success: true,
+      data: attendance,
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      return next(
+        new ErrorResponse('Active attendance session already exists for this staff member. Please check out first.', 400)
+      );
+    }
+    throw err;
+  }
 });
 
 // @desc    Update attendance record
@@ -226,8 +257,10 @@ exports.updateAttendance = asyncHandler(async (req, res, next) => {
 
     const checkoutFields = {
       checkOut: finalCheckOut,
+      checkOutTime: nowIST,
+      isActive: false,
       duration: calculatedDuration || req.body.duration,
-      status: req.body.status || attendance.status,
+      status: (req.user && req.user.role === 'staff') ? attendance.status : (req.body.status || attendance.status),
       activityType: req.body.activityType || attendance.activityType,
       projectId: req.body.projectId !== undefined ? req.body.projectId : attendance.projectId,
       projectName: req.body.projectName !== undefined ? req.body.projectName : attendance.projectName,
@@ -477,19 +510,33 @@ exports.setAttendanceOverride = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('Please provide staffId and date', 400));
   }
 
+  const { queryDailyAttendance } = require('../services/attendanceDailyService');
+
   // If status is empty or 'Remove', delete override
   if (!status || status === 'Remove' || status === 'Reset') {
     await AttendanceOverride.findOneAndDelete({ staffId, date });
+    const dailyResult = await queryDailyAttendance({
+      staffId,
+      date,
+      paginate: false,
+      userRole: 'admin',
+    });
     return res.status(200).json({
       success: true,
       message: 'Attendance override removed',
       data: null,
+      dailyRecord: dailyResult.data && dailyResult.data[0] ? dailyResult.data[0] : null,
     });
   }
 
   const validStatuses = ['Present', 'Half Day', 'Absent'];
   if (!validStatuses.includes(status)) {
     return next(new ErrorResponse(`Invalid status: ${status}. Must be one of ${validStatuses.join(', ')}`, 400));
+  }
+
+  const reasonNote = (notes || req.body.reason || '').trim();
+  if (!reasonNote) {
+    return next(new ErrorResponse('Please provide a non-blank reason for the attendance override', 400));
   }
 
   // Active check-in override safeguard: if marking Absent for a staff member who currently has an open session on that date
@@ -517,15 +564,17 @@ exports.setAttendanceOverride = asyncHandler(async (req, res, next) => {
 
       const acknowledgedIds = Array.isArray(req.body.acknowledgedSessionIds)
         ? req.body.acknowledgedSessionIds.map(String)
-        : (req.body.confirmActiveOverride === true ? activeSessionIds : []);
+        : [];
 
-      const allAcknowledged = activeSessionIds.every(id => acknowledgedIds.includes(id));
+      const allAcknowledged = activeSessionIds.length > 0 &&
+        acknowledgedIds.length === activeSessionIds.length &&
+        activeSessionIds.every(id => acknowledgedIds.includes(id));
 
       if (!allAcknowledged) {
         return res.status(409).json({
           success: false,
           code: 'ACTIVE_SESSION_OVERRIDE_CONFIRMATION_REQUIRED',
-          message: 'This staff member is currently checked in. Marking this day Absent will override attendance without checking them out. Confirmation is required.',
+          message: 'This staff member is currently checked in. Marking this day Absent requires explicit acknowledgement of all active session IDs.',
           data: {
             activeSessionId: activeSessions[0]._id,
             activeSessionIds,
@@ -537,8 +586,6 @@ exports.setAttendanceOverride = asyncHandler(async (req, res, next) => {
       }
     }
   }
-
-  const reasonNote = (notes || req.body.reason || '').trim();
 
   const override = await AttendanceOverride.findOneAndUpdate(
     { staffId, date },
@@ -552,8 +599,16 @@ exports.setAttendanceOverride = asyncHandler(async (req, res, next) => {
     { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );
 
+  const dailyResult = await queryDailyAttendance({
+    staffId,
+    date,
+    paginate: false,
+    userRole: 'admin',
+  });
+
   res.status(200).json({
     success: true,
     data: override,
+    dailyRecord: dailyResult.data && dailyResult.data[0] ? dailyResult.data[0] : null,
   });
 });

@@ -74,6 +74,7 @@ describe('Plot Controller', () => {
           customerName: 'Customer A',
           phone: '9876543210',
           paymentStatus: 'Not Paid',
+          expectedRegistrationDate: '2026-12-31',
         });
 
       expect(res.status).toBe(200);
@@ -90,6 +91,7 @@ describe('Plot Controller', () => {
           customerName: 'Customer B',
           phone: '9876543211',
           paymentStatus: 'Fully Paid',
+          expectedRegistrationDate: '2026-12-31',
         });
 
       expect(res.status).toBe(200);

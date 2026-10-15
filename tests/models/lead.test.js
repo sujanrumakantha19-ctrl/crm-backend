@@ -25,12 +25,9 @@ describe('Lead Model', () => {
       await expect(Lead.create({ customerName: 'Test', email: 'a@b.com' })).rejects.toThrow();
     });
 
-    it('should fail without email', async () => {
-      await expect(Lead.create({ customerName: 'Test', phone: '123' })).rejects.toThrow();
-    });
-
-    it('should fail with invalid email format', async () => {
-      await expect(Lead.create({ ...validLeadData, email: 'invalid' })).rejects.toThrow();
+    it('should allow lead without email (optional field)', async () => {
+      const lead = await Lead.create({ customerName: 'Test', phone: '123' });
+      expect(lead.customerName).toBe('Test');
     });
 
     it('should default status to Open', async () => {

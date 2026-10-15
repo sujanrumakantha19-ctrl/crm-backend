@@ -46,6 +46,17 @@ const AttendanceSchema = new mongoose.Schema(
     location: {
       type: String,
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    checkInTime: {
+      type: Date,
+    },
+    checkOutTime: {
+      type: Date,
+    },
   },
   {
     timestamps: true,
@@ -54,5 +65,19 @@ const AttendanceSchema = new mongoose.Schema(
 
 // Create index for staffId and date for quicker lookups
 AttendanceSchema.index({ staffId: 1, date: 1 });
+
+// Database-backed single-active-session guard per staff member
+AttendanceSchema.index(
+  { staffId: 1, isActive: 1 },
+  { unique: true, partialFilterExpression: { isActive: true } }
+);
+
+AttendanceSchema.pre('validate', function () {
+  const isClosed = !!(this.checkOut && this.checkOut !== '-' && this.checkOut !== '—');
+  const hasCheckIn = !!(this.checkIn && this.checkIn !== '-' && this.checkIn !== '—');
+  if (isClosed || !hasCheckIn) {
+    this.isActive = false;
+  }
+});
 
 module.exports = mongoose.model('Attendance', AttendanceSchema);

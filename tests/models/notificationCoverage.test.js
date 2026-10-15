@@ -18,7 +18,7 @@ describe('Notification Model Coverage', () => {
     });
 
     it('should return correct title for lead_status', () => {
-      expect(Notification.getTitleForType('lead_status')).toBe('📋 Lead Status Updated');
+      expect(Notification.getTitleForType('lead_status')).toBe('📋 Lead Notification');
     });
 
     it('should return correct title for new_lead', () => {

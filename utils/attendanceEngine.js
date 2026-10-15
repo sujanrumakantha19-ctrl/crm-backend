@@ -125,6 +125,21 @@ function calculateSessionMinutes(session, sessionDate, todayDateStr) {
 
   if (hasCheckOut) {
     const outMins = parseTimeToMinutes(session.checkOut);
+    if (session.checkInTime && session.checkOutTime) {
+      const inMs = new Date(session.checkInTime).getTime();
+      const outMs = new Date(session.checkOutTime).getTime();
+      if (!isNaN(inMs) && !isNaN(outMs) && outMs >= inMs) {
+        const preciseMinutes = (outMs - inMs) / (60 * 1000);
+        return {
+          minutes: preciseMinutes,
+          isClosed: true,
+          isInvalid: false,
+          hasCheckIn: true,
+          inMins: inMins !== null ? inMins : Math.floor(inMs / 60000) % (24 * 60),
+          outMins: outMins !== null ? outMins : Math.floor(outMs / 60000) % (24 * 60),
+        };
+      }
+    }
     if (inMins !== null && outMins !== null) {
       if (outMins >= inMins) {
         const diff = outMins - inMins;
@@ -204,7 +219,7 @@ const STATUS_THRESHOLDS = {
  * - > 480m (> 8h) => 'Present'
  */
 function classifyMinutesToStatus(totalMinutes) {
-  if (totalMinutes >= STATUS_THRESHOLDS.FULL_DAY_MIN_MINUTES) {
+  if (totalMinutes > STATUS_THRESHOLDS.FULL_DAY_MIN_MINUTES) {
     return 'Present';
   }
   if (totalMinutes >= STATUS_THRESHOLDS.HALF_DAY_MIN_MINUTES) {
@@ -359,7 +374,7 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
   } else if (hasNeedsReview) {
     calculatedStatus = 'Needs Review';
   } else if (hasOpenSession) {
-    calculatedStatus = totalCompletedMinutes >= STATUS_THRESHOLDS.FULL_DAY_MIN_MINUTES ? 'Present' : 'In Progress';
+    calculatedStatus = 'In Progress';
   } else {
     calculatedStatus = classifyMinutesToStatus(totalCompletedMinutes);
   }

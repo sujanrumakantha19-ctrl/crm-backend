@@ -348,6 +348,11 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
   const newCommentsCount = req.body.comments ? req.body.comments.length : 0;
   const commentAdded = newCommentsCount > oldCommentsCount;
 
+  const updateQuery = { _id: req.params.id };
+  if (req.body.version !== undefined && req.body.version !== null) {
+    updateQuery.version = Number(req.body.version);
+  }
+
   const allowedFields = {
     title: req.body.title,
     description: req.body.description,
@@ -358,21 +363,43 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
     dueDate: req.body.dueDate,
     dueTime: req.body.dueTime,
     project: (req.body.project === 'General' || req.body.project === '') ? null : req.body.project,
-    comments: req.body.comments,
     approvedBy,
     approvedAt,
     reopenedBy,
     reopenedAt,
     reopenReason,
-    $inc: { version: 1 },
   };
 
   Object.keys(allowedFields).forEach(key => allowedFields[key] === undefined && delete allowedFields[key]);
 
-  task = await Task.findByIdAndUpdate(req.params.id, allowedFields, {
+  const updateOp = {
+    $set: allowedFields,
+    $inc: { version: 1 },
+  };
+
+  // Safe comment append: $push new comments rather than full replace
+  if (req.body.newComment) {
+    updateOp.$push = { comments: req.body.newComment };
+  } else if (Array.isArray(req.body.comments) && req.body.comments.length > oldCommentsCount) {
+    const newComments = req.body.comments.slice(oldCommentsCount);
+    updateOp.$push = { comments: { $each: newComments } };
+  } else if (req.body.comments && oldCommentsCount === 0) {
+    updateOp.$set.comments = req.body.comments;
+  }
+
+  const updatedTask = await Task.findOneAndUpdate(updateQuery, updateOp, {
     returnDocument: 'after',
     runValidators: true,
   });
+
+  if (!updatedTask) {
+    if (req.body.version !== undefined && req.body.version !== null) {
+      return next(new ErrorResponse('Task has been modified by another user. Please refresh and try again.', 409));
+    }
+    return next(new ErrorResponse(`Task not found with id of ${req.params.id}`, 404));
+  }
+
+  task = updatedTask;
 
   // If a comment was added, send notification
   if (commentAdded) {

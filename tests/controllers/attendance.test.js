@@ -109,29 +109,48 @@ describe('Attendance Controller', () => {
   });
 
   describe('Rapid re-check-in (issue 29)', () => {
-    it('should create a NEW record on repeated check-in instead of merging previous one', async () => {
+    it('should reject second active check-in while active, and allow new record after checkout', async () => {
       const date = new Date().toISOString().slice(0, 10);
 
+      // 1. First active check-in
       const first = await request(app)
         .post('/api/v1/attendance')
         .set('Authorization', `Bearer ${staffToken}`)
-        .send({ staffId: staffUser._id, staffName: staffUser.name, date, checkIn: '09:00', status: 'Present', role: 'staff' });
+        .send({ staffId: staffUser._id, staffName: staffUser.name, date, activityType: 'Office' });
       expect(first.status).toBe(201);
+      const firstId = first.body.data._id || first.body.data.id;
 
+      // 2. Second check-in without checking out must be rejected with 400
+      const activeDuplicate = await request(app)
+        .post('/api/v1/attendance')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ staffId: staffUser._id, staffName: staffUser.name, date, activityType: 'Projects' });
+      expect(activeDuplicate.status).toBe(400);
+      expect(activeDuplicate.body.error).toMatch(/active attendance session already exists/i);
+
+      // 3. Checkout the first session
+      const checkoutRes = await request(app)
+        .put(`/api/v1/attendance/${firstId}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ checkOut: '12:00 PM' });
+      expect(checkoutRes.status).toBe(200);
+
+      // 4. Now second check-in succeeds and creates a new separate record on same date
       const second = await request(app)
         .post('/api/v1/attendance')
         .set('Authorization', `Bearer ${staffToken}`)
-        .send({ staffId: staffUser._id, staffName: staffUser.name, date, checkIn: '09:05', status: 'Present', role: 'staff' });
+        .send({ staffId: staffUser._id, staffName: staffUser.name, date, activityType: 'Projects' });
 
       expect(second.status).toBe(201);
-      expect(String(second.body.data.id)).not.toBe(String(first.body.data.id));
+      const secondId = second.body.data._id || second.body.data.id;
+      expect(String(secondId)).not.toBe(String(firstId));
 
       const count = await Attendance.countDocuments({ staffId: staffUser._id, date });
       expect(count).toBe(2);
 
-      // The first record must keep its original check-in and not be cleared
-      const firstDoc = await Attendance.findById(first.body.data.id);
-      expect(firstDoc.checkIn).toBe('09:00');
+      // First record remains intact with its checkout
+      const firstDoc = await Attendance.findById(firstId);
+      expect(firstDoc.checkOut).toBeDefined();
     });
   });
 
@@ -367,20 +386,38 @@ describe('Attendance Controller', () => {
       expect(detailLines.length).toBe(3); // Header + 2 sessions
     });
 
-    it('should return 409 when marking Absent for staff with active running session unless confirmed', async () => {
+    it('should reject second active check-in when an active session already exists', async () => {
+      // First active check-in
+      const res1 = await request(app)
+        .post('/api/v1/attendance')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ activityType: 'Office' });
+      expect(res1.status).toBe(201);
+
+      // Second check-in while still checked in
+      const res2 = await request(app)
+        .post('/api/v1/attendance')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ activityType: 'Projects' });
+      expect(res2.status).toBe(400);
+      expect(res2.body.error).toMatch(/active attendance session already exists/i);
+    });
+
+    it('should require non-blank reason and acknowledged session IDs for Absent override on active session', async () => {
       // Create an open active session
-      await Attendance.create({
+      const openSession = await Attendance.create({
         staffId: staffUser._id,
         staffName: staffUser.name,
         date: '2024-07-01',
         checkIn: '09:30',
         checkOut: '-',
         status: 'Present',
+        isActive: true,
         role: 'staff',
       });
 
-      // Attempting to set override status to Absent without confirmation
-      const res1 = await request(app)
+      // 1. Attempting without reason
+      const resNoReason = await request(app)
         .post('/api/v1/attendance/override')
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
@@ -388,26 +425,44 @@ describe('Attendance Controller', () => {
           date: '2024-07-01',
           status: 'Absent',
         });
-      expect(res1.status).toBe(409);
-      expect(res1.body.code).toBe('ACTIVE_SESSION_OVERRIDE_CONFIRMATION_REQUIRED');
+      expect(resNoReason.status).toBe(400);
+      expect(resNoReason.body.error).toMatch(/non-blank reason/i);
 
-      // Attempting with confirmActiveOverride: true
-      const res2 = await request(app)
+      // 2. Attempting with reason but without acknowledgedSessionIds (even if confirmActiveOverride is true)
+      const resUnack = await request(app)
         .post('/api/v1/attendance/override')
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           staffId: staffUser._id,
           date: '2024-07-01',
           status: 'Absent',
+          reason: 'Staff not on duty',
           confirmActiveOverride: true,
         });
-      expect(res2.status).toBe(200);
-      expect(res2.body.data.status).toBe('Absent');
+      expect(resUnack.status).toBe(409);
+      expect(resUnack.body.code).toBe('ACTIVE_SESSION_OVERRIDE_CONFIRMATION_REQUIRED');
+      expect(resUnack.body.data.activeSessionIds).toContain(String(openSession._id));
 
-      // Verify the running session still exists and was not corrupted
-      const session = await Attendance.findOne({ staffId: staffUser._id, date: '2024-07-01', checkOut: '-' });
+      // 3. Attempting with proper acknowledgedSessionIds and reason
+      const resSuccess = await request(app)
+        .post('/api/v1/attendance/override')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          staffId: staffUser._id,
+          date: '2024-07-01',
+          status: 'Absent',
+          reason: 'Verified staff left premises early',
+          acknowledgedSessionIds: [String(openSession._id)],
+        });
+      expect(resSuccess.status).toBe(200);
+      expect(resSuccess.body.data.status).toBe('Absent');
+      expect(resSuccess.body.dailyRecord).toBeDefined();
+      expect(resSuccess.body.dailyRecord.status).toBe('Absent');
+
+      // Verify running session still exists and was not terminated
+      const session = await Attendance.findById(openSession._id);
       expect(session).not.toBeNull();
-      expect(session.checkIn).toBe('09:30');
+      expect(session.checkOut).toBe('-');
     });
   });
 });

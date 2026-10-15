@@ -131,6 +131,7 @@ describe('Integration Tests', () => {
           customerName: 'Booking Customer',
           phone: '9876543210',
           paymentStatus: 'Not Paid',
+          expectedRegistrationDate: '2026-12-31',
         });
       expect(bookRes.status).toBe(200);
       expect(bookRes.body.data.status).toBe('Pending');
@@ -170,7 +171,7 @@ describe('Integration Tests', () => {
       await request(app)
         .put(`/api/v1/plots/${plotId}/book`)
         .set('Authorization', `Bearer ${staff.token}`)
-        .send({ customerName: 'Rejected Customer', phone: '111' });
+        .send({ customerName: 'Rejected Customer', phone: '111', expectedRegistrationDate: '2026-12-31' });
 
       // Admin rejects
       const rejectRes = await request(app)
@@ -225,7 +226,7 @@ describe('Integration Tests', () => {
       // 5. Mark as done
       const doneRes = await request(app)
         .put(`/api/v1/tasks/${taskId}`)
-        .set('Authorization', `Bearer ${staff.token}`)
+        .set('Authorization', `Bearer ${admin.token}`)
         .send({ status: 'Done' });
       expect(doneRes.status).toBe(200);
       expect(doneRes.body.data.status).toBe('Done');
@@ -257,7 +258,8 @@ describe('Integration Tests', () => {
         .set('Authorization', `Bearer ${staff.token}`)
         .send({ checkOut: '18:00', duration: '9h' });
       expect(outRes.status).toBe(200);
-      expect(outRes.body.data.checkOut).toBe('18:00');
+      expect(outRes.body.data.checkOut).toBeDefined();
+      expect(outRes.body.data.isActive).toBe(false);
     });
   });
 

@@ -39,14 +39,14 @@ describe('Multi-plot booking', () => {
     const bookA = await request(app)
       .put(`/api/v1/plots/${plotA._id}/book`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
     expect(bookA.status).toBe(200);
     expect(bookA.body.data.status).toBe('Booked');
 
     const bookB = await request(app)
       .put(`/api/v1/plots/${plotB._id}/book`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
     expect(bookB.status).toBe(200);
     expect(bookB.body.data.status).toBe('Booked');
 
@@ -77,7 +77,7 @@ describe('Multi-plot booking', () => {
     const bookA = await request(app)
       .put(`/api/v1/plots/${plotA._id}/book`)
       .set('Authorization', `Bearer ${staff.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
     expect(bookA.status).toBe(200);
     expect(bookA.body.data.status).toBe('Pending');
 
@@ -90,7 +90,7 @@ describe('Multi-plot booking', () => {
     const bookB = await request(app)
       .put(`/api/v1/plots/${plotB._id}/book`)
       .set('Authorization', `Bearer ${staff.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
     expect(bookB.status).toBe(200);
     expect(bookB.body.data.status).toBe('Pending');
 
@@ -130,12 +130,12 @@ describe('Multi-plot booking', () => {
     await request(app)
       .put(`/api/v1/plots/${plotA._id}/book`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
 
     await request(app)
       .put(`/api/v1/plots/${plotB._id}/book`)
       .set('Authorization', `Bearer ${staff.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
 
     const rejectB = await request(app)
       .put(`/api/v1/plots/${plotB._id}/reject`)
@@ -158,7 +158,7 @@ describe('Multi-plot booking', () => {
     await request(app)
       .put(`/api/v1/plots/${plotC._id}/book`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
 
     const cancelC = await request(app)
       .put(`/api/v1/plots/${plotC._id}/cancel`)
@@ -191,11 +191,11 @@ describe('Multi-plot booking', () => {
     await request(app)
       .put(`/api/v1/plots/${plotA._id}/book`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
     await request(app)
       .put(`/api/v1/plots/${plotB._id}/book`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
 
     const res = await request(app)
       .get('/api/v1/plots/my-bookings')
@@ -220,11 +220,11 @@ describe('Multi-plot booking', () => {
     await request(app)
       .put(`/api/v1/plots/${plotA._id}/book`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
     await request(app)
       .put(`/api/v1/plots/${plotB._id}/book`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone });
+      .send({ leadId: String(lead._id), customerName: lead.customerName, phone: lead.phone, expectedRegistrationDate: '2026-12-31' });
 
     const reg = await request(app)
       .put(`/api/v1/plots/${plotA._id}/register`)

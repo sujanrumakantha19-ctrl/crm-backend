@@ -318,31 +318,17 @@ exports.deleteGroup = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/groups/:id/members
 // @access  Private/Admin
 exports.addMember = asyncHandler(async (req, res, next) => {
-  const group = await Group.findById(req.params.id);
+  const groupId = req.params.id;
+  const group = await Group.findById(groupId);
 
   if (!group) {
-    return next(new ErrorResponse(`Group not found with id of ${req.params.id}`, 404));
+    return next(new ErrorResponse(`Group not found with id of ${groupId}`, 404));
   }
 
   const { userId, expectedCurrentGroupId } = req.body;
 
   if (!userId) {
     return next(new ErrorResponse('Please provide a userId', 400));
-  }
-
-  const User = require('../models/User');
-  const user = await User.findById(userId);
-  if (!user) {
-    return next(new ErrorResponse(`User not found with id of ${userId}`, 404));
-  }
-
-  // Concurrency check: verify staff member's current group matches expected
-  if (expectedCurrentGroupId !== undefined) {
-    const currentGroupIdStr = user.groupId ? String(user.groupId) : null;
-    const expectedStr = (expectedCurrentGroupId === 'none' || expectedCurrentGroupId === null) ? null : String(expectedCurrentGroupId);
-    if (currentGroupIdStr !== expectedStr) {
-      return next(new ErrorResponse('Staff group membership has changed concurrently. Please refresh.', 409));
-    }
   }
 
   // If already in this group:
@@ -356,20 +342,12 @@ exports.addMember = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('User already in group', 400));
   }
 
-  // Remove user from any other group first so user belongs to at most one group
-  await Group.updateMany({ _id: { $ne: group._id }, members: userId }, { $pull: { members: userId } });
-
-  if (!group.members.some(m => String(m) === String(userId))) {
-    group.members.push(userId);
-    await group.save();
-  }
-
-  // Sync User.groupId so membership stays consistent
-  await User.updateOne({ _id: userId }, { groupId: group._id });
+  const { assignUserToGroup } = require('../services/groupMembershipService');
+  const result = await assignUserToGroup(userId, groupId, { expectedCurrentGroupId });
 
   res.status(200).json({
     success: true,
-    data: group,
+    data: result.group,
   });
 });
 
@@ -377,28 +355,19 @@ exports.addMember = asyncHandler(async (req, res, next) => {
 // @route   DELETE /api/v1/groups/:id/members/:userId
 // @access  Private/Admin
 exports.removeMember = asyncHandler(async (req, res, next) => {
-  const group = await Group.findById(req.params.id);
+  const groupId = req.params.id;
+  const group = await Group.findById(groupId);
 
   if (!group) {
-    return next(new ErrorResponse(`Group not found with id of ${req.params.id}`, 404));
+    return next(new ErrorResponse(`Group not found with id of ${groupId}`, 404));
   }
 
-  const memberIndex = group.members.findIndex(m => String(m) === String(req.params.userId));
+  const { removeUserFromGroup } = require('../services/groupMembershipService');
+  await removeUserFromGroup(req.params.userId, groupId);
 
-  if (memberIndex === -1) {
-    // Idempotent: if already removed, return 200
-    return res.status(200).json({ success: true, data: group });
-  }
-
-  group.members.splice(memberIndex, 1);
-  await group.save();
-
-  // Sync User.groupId so membership stays consistent (issue 66)
-  const User = require('../models/User');
-  await User.updateOne({ _id: req.params.userId, groupId: group._id }, { groupId: null });
-
+  const updatedGroup = await Group.findById(groupId).populate('members', 'name initials role displayId');
   res.status(200).json({
     success: true,
-    data: group,
+    data: updatedGroup || group,
   });
 });

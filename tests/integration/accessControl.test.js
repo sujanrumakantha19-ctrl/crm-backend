@@ -197,7 +197,7 @@ describe('Access Control: Role-Based Permissions', () => {
       await request(app)
         .put(`/api/v1/plots/${plotId}/book`)
         .set('Authorization', `Bearer ${staff.token}`)
-        .send({ customerName: 'Test', phone: '123' });
+        .send({ customerName: 'Test', phone: '123', expectedRegistrationDate: '2026-12-31' });
 
       // Staff cannot approve
       const staffApprove = await request(app)
@@ -228,7 +228,7 @@ describe('Access Control: Role-Based Permissions', () => {
       await request(app)
         .put(`/api/v1/plots/${plotId}/book`)
         .set('Authorization', `Bearer ${staff.token}`)
-        .send({ customerName: 'Test', phone: '456' });
+        .send({ customerName: 'Test', phone: '456', expectedRegistrationDate: '2026-12-31' });
 
       // Partner cannot reject
       const partnerReject = await request(app)
@@ -257,7 +257,7 @@ describe('Access Control: Role-Based Permissions', () => {
       const staffBook = await request(app)
         .put(`/api/v1/plots/${plots.body.data[0].id}/book`)
         .set('Authorization', `Bearer ${staff.token}`)
-        .send({ customerName: 'Staff Customer', phone: '789' });
+        .send({ customerName: 'Staff Customer', phone: '789', expectedRegistrationDate: '2026-12-31' });
       expect(staffBook.status).toBe(200);
       expect(staffBook.body.data.status).toBe('Pending');
     });
@@ -275,7 +275,7 @@ describe('Access Control: Role-Based Permissions', () => {
       const adminBook = await request(app)
         .put(`/api/v1/plots/${plots.body.data[0].id}/book`)
         .set('Authorization', `Bearer ${admin.token}`)
-        .send({ customerName: 'Admin Customer', phone: '000', paymentStatus: 'Fully Paid' });
+        .send({ customerName: 'Admin Customer', phone: '000', paymentStatus: 'Fully Paid', expectedRegistrationDate: '2026-12-31' });
       expect(adminBook.status).toBe(200);
       expect(adminBook.body.data.status).toBe('Booked');
     });
@@ -297,13 +297,13 @@ describe('Access Control: Role-Based Permissions', () => {
       await request(app)
         .put(`/api/v1/plots/${plotId}/book`)
         .set('Authorization', `Bearer ${admin.token}`)
-        .send({ customerName: 'First', phone: '111' });
+        .send({ customerName: 'First', phone: '111', expectedRegistrationDate: '2026-12-31' });
 
       // Staff tries to book the same plot — should fail
       const secondBook = await request(app)
         .put(`/api/v1/plots/${plotId}/book`)
         .set('Authorization', `Bearer ${staff.token}`)
-        .send({ customerName: 'Second', phone: '222' });
+        .send({ customerName: 'Second', phone: '222', expectedRegistrationDate: '2026-12-31' });
       expect(secondBook.status).toBe(400);
     });
 
@@ -356,13 +356,13 @@ describe('Access Control: Role-Based Permissions', () => {
       await request(app)
         .put(`/api/v1/plots/${plotId}/book`)
         .set('Authorization', `Bearer ${staff.token}`)
-        .send({ customerName: 'First', phone: '111' });
+        .send({ customerName: 'First', phone: '111', expectedRegistrationDate: '2026-12-31' });
 
       // Second booking on same plot — should fail
       const secondBook = await request(app)
         .put(`/api/v1/plots/${plotId}/book`)
         .set('Authorization', `Bearer ${staff.token}`)
-        .send({ customerName: 'Second', phone: '222' });
+        .send({ customerName: 'Second', phone: '222', expectedRegistrationDate: '2026-12-31' });
       expect(secondBook.status).toBe(400);
     });
   });

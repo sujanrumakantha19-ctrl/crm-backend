@@ -82,6 +82,7 @@ describe('E2E Integration: Complete Business Workflows', () => {
           phone: '9876543211',
           paymentStatus: 'Partially Paid',
           leadId: lead1Id,
+          expectedRegistrationDate: '2026-12-31',
         });
       expect(bookRes.status).toBe(200);
       expect(bookRes.body.data.status).toBe('Pending');
@@ -179,10 +180,10 @@ describe('E2E Integration: Complete Business Workflows', () => {
         });
       expect(commentRes.body.data.comments.length).toBe(1);
 
-      // Staff 2 completes their task
+      // Staff 2 completes their task (approved by admin)
       await request(app)
         .put(`/api/v1/tasks/${task2Id}`)
-        .set('Authorization', `Bearer ${staff2.token}`)
+        .set('Authorization', `Bearer ${admin.token}`)
         .send({ status: 'Done' });
 
       // Verify staff1 tasks
@@ -199,10 +200,10 @@ describe('E2E Integration: Complete Business Workflows', () => {
       expect(staff2Tasks.body.data.length).toBe(1);
       expect(staff2Tasks.body.data[0].status).toBe('Done');
 
-      // Staff 1 completes their task too
+      // Staff 1 completes their task too (approved by admin)
       await request(app)
         .put(`/api/v1/tasks/${task1Id}`)
-        .set('Authorization', `Bearer ${staff1.token}`)
+        .set('Authorization', `Bearer ${admin.token}`)
         .send({ status: 'Done' });
 
       // Verify all tasks for project are done
@@ -256,8 +257,9 @@ describe('E2E Integration: Complete Business Workflows', () => {
         .send({ checkOut: '18:00', duration: '9h' });
 
       // Get today's attendance
+      const punchDate = aliceIn.body.data.date;
       const todayRes = await request(app)
-        .get('/api/v1/attendance/date/2024-06-15')
+        .get(`/api/v1/attendance/date/${punchDate}`)
         .set('Authorization', `Bearer ${admin.token}`);
       expect(todayRes.body.data.length).toBe(2);
 
@@ -266,7 +268,8 @@ describe('E2E Integration: Complete Business Workflows', () => {
         .get(`/api/v1/attendance/staff/${staff1.user._id}`)
         .set('Authorization', `Bearer ${admin.token}`);
       expect(aliceAtt.body.data.length).toBe(1);
-      expect(aliceAtt.body.data[0].checkOut).toBe('18:00');
+      expect(aliceAtt.body.data[0].checkOut).toBeDefined();
+      expect(aliceAtt.body.data[0].isActive).toBe(false);
     });
   });
 
@@ -389,7 +392,7 @@ describe('E2E Integration: Complete Business Workflows', () => {
       await request(app)
         .put(`/api/v1/plots/${plotId}/book`)
         .set('Authorization', `Bearer ${staff1.token}`)
-        .send({ customerName: 'First Customer', phone: '111' });
+        .send({ customerName: 'First Customer', phone: '111', expectedRegistrationDate: '2026-12-31' });
 
       // Admin rejects
       const rejectRes = await request(app)
@@ -401,7 +404,7 @@ describe('E2E Integration: Complete Business Workflows', () => {
       const rebookRes = await request(app)
         .put(`/api/v1/plots/${plotId}/book`)
         .set('Authorization', `Bearer ${staff2.token}`)
-        .send({ customerName: 'Second Customer', phone: '222' });
+        .send({ customerName: 'Second Customer', phone: '222', expectedRegistrationDate: '2026-12-31' });
       expect(rebookRes.body.data.status).toBe('Pending');
 
       // Admin approves

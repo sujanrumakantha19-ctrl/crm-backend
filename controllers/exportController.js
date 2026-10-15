@@ -74,6 +74,44 @@ exports.exportLeads = asyncHandler(async (req, res, next) => {
           }
         }
       },
+      {
+        $lookup: {
+          from: 'projects',
+          localField: 'projectId',
+          foreignField: '_id',
+          as: 'projectDoc',
+        },
+      },
+      {
+        $lookup: {
+          from: 'plots',
+          localField: 'plotId',
+          foreignField: '_id',
+          as: 'plotDoc',
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'assignedTo',
+          foreignField: '_id',
+          as: 'userDoc',
+        },
+      },
+      {
+        $addFields: {
+          projectId: { $ifNull: [{ $arrayElemAt: ['$projectDoc', 0] }, '$projectId'] },
+          plotId: { $ifNull: [{ $arrayElemAt: ['$plotDoc', 0] }, '$plotId'] },
+          assignedTo: { $ifNull: [{ $arrayElemAt: ['$userDoc', 0] }, '$assignedTo'] },
+        },
+      },
+      {
+        $project: {
+          projectDoc: 0,
+          plotDoc: 0,
+          userDoc: 0,
+        },
+      },
       { $sort: { createdAt: -1, _id: -1 } }
     ]).cursor();
 
