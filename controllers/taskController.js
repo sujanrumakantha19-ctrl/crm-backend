@@ -1,7 +1,24 @@
+const mongoose = require('mongoose');
 const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
 const Task = require('../models/Task');
 const { getTodayDateStringIST } = require('../utils/dateIST');
+
+function isValidCalendarDateString(str) {
+  if (!str) return true;
+  if (typeof str !== 'string') {
+    if (str instanceof Date) return !isNaN(str.getTime());
+    return false;
+  }
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
+  if (!match) return false;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && (d.getUTCMonth() + 1) === month && d.getUTCDate() === day;
+}
 
 function toDateStr(d) {
   if (!d) return '';
@@ -144,9 +161,18 @@ exports.getTask = asyncHandler(async (req, res, next) => {
 exports.createTask = asyncHandler(async (req, res, next) => {
   let { title, description, status, priority, assignee, assigneeInitials, dueDate, dueTime, project, comments } = req.body;
 
+  if (project !== undefined && project !== null && project !== '' && project !== 'General') {
+    if (!mongoose.Types.ObjectId.isValid(project)) {
+      return next(new ErrorResponse('Invalid project ID format', 400));
+    }
+  }
+
   const todayIST = getTodayDateStringIST();
 
   if (dueDate) {
+    if (!isValidCalendarDateString(dueDate)) {
+      return next(new ErrorResponse('Invalid calendar date for task deadline', 400));
+    }
     const dueStr = toDateStr(dueDate);
     if (dueStr && dueStr < todayIST) {
       return next(new ErrorResponse('Task deadline cannot be in the past', 400));
@@ -160,8 +186,7 @@ exports.createTask = asyncHandler(async (req, res, next) => {
     assigneeInitials = req.user.initials || 'ST';
   }
 
-  const mongoose = require('mongoose');
-  const validProject = (project && mongoose.Types.ObjectId.isValid(project)) ? project : undefined;
+  const validProject = (project && project !== 'General' && mongoose.Types.ObjectId.isValid(project)) ? project : undefined;
 
   const task = await Task.create({
     title,
@@ -215,10 +240,20 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Task not found with id of ${req.params.id}`, 404));
   }
 
+  // Optimistic concurrency check
+  if (req.body.version !== undefined && req.body.version !== null) {
+    if (Number(req.body.version) !== (task.version || 0)) {
+      return next(new ErrorResponse('Task has been modified by another user. Please refresh and try again.', 409));
+    }
+  }
+
   const todayIST = getTodayDateStringIST();
 
   // Validate deadline if dueDate is provided and modified to a new date
-  if (req.body.dueDate !== undefined) {
+  if (req.body.dueDate !== undefined && req.body.dueDate !== null && req.body.dueDate !== '') {
+    if (!isValidCalendarDateString(req.body.dueDate)) {
+      return next(new ErrorResponse('Invalid calendar date for task deadline', 400));
+    }
     const newDueStr = toDateStr(req.body.dueDate);
     const oldDueStr = toDateStr(task.dueDate);
     if (newDueStr && newDueStr !== oldDueStr && newDueStr < todayIST) {
@@ -226,8 +261,17 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
     }
   }
 
+  if (req.body.project !== undefined && req.body.project !== null && req.body.project !== '' && req.body.project !== 'General') {
+    if (!mongoose.Types.ObjectId.isValid(req.body.project)) {
+      return next(new ErrorResponse('Invalid project ID format', 400));
+    }
+  }
+
+  const isStaff = req.user && req.user.role === 'staff';
+  const isAdmin = req.user && req.user.role === 'admin';
+
   // Staff may only update tasks assigned to them (issue 30). Admins can update any task.
-  if (req.user && req.user.role === 'staff') {
+  if (isStaff) {
     const uid = String(req.user.id || (req.user._id || ''));
     const assigneeId = task.assignee ? String(task.assignee) : '';
     if (!assigneeId || assigneeId !== uid) {
@@ -235,24 +279,68 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
     }
 
     if (task.status === 'Done') {
-      return next(new ErrorResponse('Completed tasks cannot be modified by staff', 403));
-    }
+      // Staff cannot modify status, title, description, etc. on Done tasks, but CAN add comments
+      const nonCommentKeys = Object.keys(req.body).filter(k => k !== 'comments' && k !== 'version');
+      const isAttemptingOtherChange = nonCommentKeys.some(k => {
+        if (req.body[k] === undefined) return false;
+        if (k === 'status' && req.body[k] !== 'Done') return true;
+        if (k === 'title' && req.body[k] !== task.title) return true;
+        if (k === 'description' && req.body[k] !== (task.description || '')) return true;
+        if (k === 'priority' && req.body[k] !== task.priority) return true;
+        if (k === 'dueDate') return toDateStr(req.body[k]) !== toDateStr(task.dueDate);
+        if (k === 'assignee' || k === 'assigneeInitials' || k === 'project' || k === 'dueTime') return true;
+        return false;
+      });
 
-    if (req.body.status) {
-      if (req.body.status === 'Done') {
-        return next(new ErrorResponse('Only administrators can mark tasks as Done', 403));
+      if (isAttemptingOtherChange) {
+        return next(new ErrorResponse('Completed tasks cannot be modified by staff', 403));
       }
-      const allowedStaffStatuses = ['To Do', 'In Progress', 'In Review'];
-      if (!allowedStaffStatuses.includes(req.body.status)) {
-        return next(new ErrorResponse(`Invalid status for staff: ${req.body.status}`, 400));
+
+      for (const k of nonCommentKeys) {
+        delete req.body[k];
+      }
+    } else {
+      // Unfinished tasks: staff can edit title and description, and submit comments
+      // Staff cannot reassign a task, change its project/priority, or change deadline
+      delete req.body.assignee;
+      delete req.body.assigneeInitials;
+      delete req.body.project;
+      delete req.body.priority;
+      delete req.body.dueDate;
+      delete req.body.dueTime;
+
+      if (req.body.status) {
+        if (req.body.status === 'Done') {
+          return next(new ErrorResponse('Only administrators can mark tasks as Done', 403));
+        }
+        const allowedStaffStatuses = ['To Do', 'In Progress', 'In Review'];
+        if (!allowedStaffStatuses.includes(req.body.status)) {
+          return next(new ErrorResponse(`Invalid status for staff: ${req.body.status}`, 400));
+        }
       }
     }
+  }
 
-    // Staff cannot reassign a task or change its project/priority
-    delete req.body.assignee;
-    delete req.body.assigneeInitials;
-    delete req.body.project;
-    delete req.body.priority;
+  // Admin approval & reopen logic
+  let approvedBy = undefined;
+  let approvedAt = undefined;
+  let reopenedBy = undefined;
+  let reopenedAt = undefined;
+  let reopenReason = undefined;
+
+  if (isAdmin) {
+    if (req.body.status === 'Done' && task.status !== 'Done') {
+      approvedBy = req.user.id || req.user._id;
+      approvedAt = new Date();
+    } else if (task.status === 'Done' && req.body.status && req.body.status !== 'Done') {
+      // Admin is reopening a Done task
+      if (!req.body.reopenReason || !req.body.reopenReason.trim()) {
+        return next(new ErrorResponse('Reopening a completed task requires a confirmed reason', 400));
+      }
+      reopenedBy = req.user.id || req.user._id;
+      reopenedAt = new Date();
+      reopenReason = req.body.reopenReason.trim();
+    }
   }
 
   // Check if comments are being updated (a new comment is added)
@@ -269,8 +357,14 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
     assigneeInitials: req.body.assigneeInitials,
     dueDate: req.body.dueDate,
     dueTime: req.body.dueTime,
-    project: req.body.project,
+    project: (req.body.project === 'General' || req.body.project === '') ? null : req.body.project,
     comments: req.body.comments,
+    approvedBy,
+    approvedAt,
+    reopenedBy,
+    reopenedAt,
+    reopenReason,
+    $inc: { version: 1 },
   };
 
   Object.keys(allowedFields).forEach(key => allowedFields[key] === undefined && delete allowedFields[key]);

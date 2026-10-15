@@ -240,7 +240,7 @@ describe('Task Controller', () => {
       expect(res.body.error).toMatch(/Completed tasks cannot be modified by staff/i);
     });
 
-    it('should allow admin to mark task as Done and reopen Done task', async () => {
+    it('should require a reason when admin reopens a Done task, and audit reopening', async () => {
       const task = await Task.create({ title: 'Admin Controlled Task', assignee: staffUser._id, status: 'In Review' });
       const res1 = await request(app)
         .put(`/api/v1/tasks/${task._id}`)
@@ -249,12 +249,82 @@ describe('Task Controller', () => {
       expect(res1.status).toBe(200);
       expect(res1.body.data.status).toBe('Done');
 
-      const res2 = await request(app)
+      // Attempt reopening without reason
+      const resFail = await request(app)
         .put(`/api/v1/tasks/${task._id}`)
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ status: 'In Progress' });
+      expect(resFail.status).toBe(400);
+      expect(resFail.body.error).toMatch(/Reopening a completed task requires a confirmed reason/i);
+
+      // Reopen with reason
+      const res2 = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'In Progress', reopenReason: 'Needs additional revision' });
       expect(res2.status).toBe(200);
       expect(res2.body.data.status).toBe('In Progress');
+      expect(res2.body.data.reopenReason).toBe('Needs additional revision');
+      expect(res2.body.data.reopenedBy).toBeDefined();
+      expect(res2.body.data.reopenedAt).toBeDefined();
+    });
+
+    it('should allow staff to add comments to a Done task without modifying task fields', async () => {
+      const task = await Task.create({ title: 'Completed Task', assignee: staffUser._id, status: 'Done' });
+      const res = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({
+          comments: [{
+            id: 'c1',
+            author: staffUser.name,
+            authorInitials: 'ST',
+            text: 'Here is an update on the completed task',
+            timestamp: new Date().toISOString(),
+          }],
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.data.comments).toHaveLength(1);
+      expect(res.body.data.status).toBe('Done');
+    });
+
+    it('should allow assigned staff to edit title and description of unfinished task', async () => {
+      const task = await Task.create({ title: 'Old Title', description: 'Old Desc', assignee: staffUser._id, status: 'To Do' });
+      const res = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ title: 'New Title Edited By Staff', description: 'New Description' });
+      expect(res.status).toBe(200);
+      expect(res.body.data.title).toBe('New Title Edited By Staff');
+      expect(res.body.data.description).toBe('New Description');
+    });
+
+    it('should reject impossible calendar dates like Feb 30 with 400', async () => {
+      const res = await request(app)
+        .post('/api/v1/tasks')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ title: 'Bad Date Task', dueDate: '2026-02-30' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Invalid calendar date/i);
+    });
+
+    it('should reject malformed project ID with 400', async () => {
+      const res = await request(app)
+        .post('/api/v1/tasks')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ title: 'Bad Project Task', project: 'invalid-project-id' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Invalid project ID format/i);
+    });
+
+    it('should reject update with 409 when version does not match', async () => {
+      const task = await Task.create({ title: 'Versioned Task', version: 1 });
+      const res = await request(app)
+        .put(`/api/v1/tasks/${task._id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ title: 'Stale Update', version: 0 });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/modified by another user/i);
     });
   });
 });

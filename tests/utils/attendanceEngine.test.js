@@ -70,13 +70,14 @@ describe('Attendance Engine Unit Tests', () => {
       expect(classifyMinutesToStatus(239)).toBe('Absent');
     });
 
-    it('should classify 240 to 480 mins as Half Day', () => {
+    it('should classify 240 to < 480 mins as Half Day', () => {
       expect(classifyMinutesToStatus(240)).toBe('Half Day');
       expect(classifyMinutesToStatus(360)).toBe('Half Day');
-      expect(classifyMinutesToStatus(480)).toBe('Half Day');
+      expect(classifyMinutesToStatus(479)).toBe('Half Day');
     });
 
-    it('should classify > 480 mins as Present', () => {
+    it('should classify >= 480 mins as Present', () => {
+      expect(classifyMinutesToStatus(480)).toBe('Present');
       expect(classifyMinutesToStatus(481)).toBe('Present');
       expect(classifyMinutesToStatus(540)).toBe('Present');
       expect(classifyMinutesToStatus(600)).toBe('Present');

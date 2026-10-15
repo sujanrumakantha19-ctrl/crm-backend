@@ -55,6 +55,27 @@ const TaskSchema = new mongoose.Schema(
         },
       },
     ],
+    reopenedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    reopenedAt: {
+      type: Date,
+    },
+    reopenReason: {
+      type: String,
+    },
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    approvedAt: {
+      type: Date,
+    },
+    version: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,

@@ -90,13 +90,28 @@ exports.getLeads = asyncHandler(async (req, res, next) => {
 // @route   GET /api/v1/leads/counts
 // @access  Private
 // @query   assignedTo, sourceId — optional ObjectId filters; omitted = company-wide (existing behavior)
-exports.getLeadCounts = asyncHandler(async (req, res) => {
+exports.getLeadCounts = asyncHandler(async (req, res, next) => {
   const match = {};
   const { assignedTo, sourceId, search } = req.query;
-  if (assignedTo && mongoose.Types.ObjectId.isValid(assignedTo)) {
+
+  // Enforce authenticated staff scoping
+  if (req.user && req.user.role === 'staff') {
+    const staffUid = String(req.user.id || req.user._id || '');
+    if (assignedTo && String(assignedTo) !== staffUid) {
+      return next(new ErrorResponse('Staff members are only authorized to access their own lead counts', 403));
+    }
+    match.assignedTo = new mongoose.Types.ObjectId(staffUid);
+  } else if (assignedTo) {
+    if (!mongoose.Types.ObjectId.isValid(assignedTo)) {
+      return next(new ErrorResponse('Invalid ObjectId format for assignedTo', 400));
+    }
     match.assignedTo = new mongoose.Types.ObjectId(assignedTo);
   }
-  if (sourceId && mongoose.Types.ObjectId.isValid(sourceId)) {
+
+  if (sourceId) {
+    if (!mongoose.Types.ObjectId.isValid(sourceId)) {
+      return next(new ErrorResponse('Invalid ObjectId format for sourceId', 400));
+    }
     match.sourceId = new mongoose.Types.ObjectId(sourceId);
   }
 

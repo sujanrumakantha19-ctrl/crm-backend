@@ -204,7 +204,7 @@ const STATUS_THRESHOLDS = {
  * - > 480m (> 8h) => 'Present'
  */
 function classifyMinutesToStatus(totalMinutes) {
-  if (totalMinutes > STATUS_THRESHOLDS.FULL_DAY_MIN_MINUTES) {
+  if (totalMinutes >= STATUS_THRESHOLDS.FULL_DAY_MIN_MINUTES) {
     return 'Present';
   }
   if (totalMinutes >= STATUS_THRESHOLDS.HALF_DAY_MIN_MINUTES) {
@@ -359,7 +359,7 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
   } else if (hasNeedsReview) {
     calculatedStatus = 'Needs Review';
   } else if (hasOpenSession) {
-    calculatedStatus = totalCompletedMinutes > STATUS_THRESHOLDS.FULL_DAY_MIN_MINUTES ? 'Present' : 'In Progress';
+    calculatedStatus = totalCompletedMinutes >= STATUS_THRESHOLDS.FULL_DAY_MIN_MINUTES ? 'Present' : 'In Progress';
   } else {
     calculatedStatus = classifyMinutesToStatus(totalCompletedMinutes);
   }

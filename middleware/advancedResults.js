@@ -214,6 +214,68 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
     applyPlotPaymentStatusFilter(parsedQuery, String(req.query.paymentStatusFilter));
   }
 
+  // Schema type casting and validation for Lead queries
+  if (model.modelName === 'Lead') {
+    // Enforce authenticated staff scoping
+    if (req.user && req.user.role === 'staff') {
+      const staffUid = String(req.user.id || req.user._id || '');
+      if (req.query.assignedTo && req.query.assignedTo !== 'unassigned') {
+        if (String(req.query.assignedTo) !== staffUid) {
+          return next(new ErrorResponse('Staff members are only authorized to access their own assigned leads', 403));
+        }
+      }
+      // If not querying the Open Leads Pool, default to staff's own assigned leads
+      if (!req.query.assignedTo && req.query.status !== 'Open' && parsedQuery.assignedTo === undefined) {
+        parsedQuery.assignedTo = new mongoose.Types.ObjectId(staffUid);
+      }
+    }
+
+    // Cast ObjectId fields
+    const objectIdFields = ['assignedTo', 'projectId', 'plotId', 'sourceId', '_id'];
+    for (const field of objectIdFields) {
+      const val = parsedQuery[field];
+      if (val !== undefined && val !== null) {
+        if (typeof val === 'string') {
+          if (!mongoose.Types.ObjectId.isValid(val)) {
+            return next(new ErrorResponse(`Invalid ObjectId format for ${field}`, 400));
+          }
+          parsedQuery[field] = new mongoose.Types.ObjectId(val);
+        } else if (val && typeof val === 'object' && Array.isArray(val.$in)) {
+          for (let i = 0; i < val.$in.length; i++) {
+            const item = val.$in[i];
+            if (item !== null && item !== undefined && typeof item === 'string') {
+              if (!mongoose.Types.ObjectId.isValid(item)) {
+                return next(new ErrorResponse(`Invalid ObjectId format in $in for ${field}`, 400));
+              }
+              val.$in[i] = new mongoose.Types.ObjectId(item);
+            }
+          }
+        }
+      }
+    }
+
+    // Cast Date fields for aggregation
+    ['createdAt', 'updatedAt', 'dateAdded'].forEach(field => {
+      if (parsedQuery[field] && typeof parsedQuery[field] === 'object') {
+        ['$gte', '$gt'].forEach(op => {
+          if (parsedQuery[field][op] && typeof parsedQuery[field][op] === 'string') {
+            const d = new Date(parsedQuery[field][op]);
+            if (!isNaN(d.getTime())) parsedQuery[field][op] = d;
+          }
+        });
+        ['$lte', '$lt'].forEach(op => {
+          if (parsedQuery[field][op] && typeof parsedQuery[field][op] === 'string') {
+            let s = parsedQuery[field][op];
+            if (s.endsWith('\uffff')) s = s.slice(0, -1);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(s)) s = `${s}T23:59:59.999Z`;
+            const d = new Date(s);
+            if (!isNaN(d.getTime())) parsedQuery[field][op] = d;
+          }
+        });
+      }
+    });
+  }
+
   // Finding resource
   query = model.find(parsedQuery);
 
@@ -257,17 +319,15 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
 
     const aggResult = await model.aggregate([
       { $match: parsedQuery },
+      { $sort: { createdAt: -1, _id: -1 } },
       {
         $group: {
           _id: groupKeyExpr,
           firstDoc: { $first: '$$ROOT' },
-          latestCreatedAt: { $max: { $ifNull: ['$createdAt', '$dateAdded'] } },
+          latestCreatedAt: { $first: { $ifNull: ['$createdAt', '$dateAdded'] } },
           relatedBookingCount: { $sum: 1 },
           relatedLeadDisplayIds: { $addToSet: '$displayId' },
           relatedLeadIds: { $addToSet: '$_id' },
-          assignedTo: { $max: '$assignedTo' },
-          assignedToName: { $max: '$assignedToName' },
-          assignedToDisplayId: { $max: '$assignedToDisplayId' },
         }
       },
       {

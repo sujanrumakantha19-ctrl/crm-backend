@@ -4,8 +4,17 @@ const mongoSanitize = require('mongo-sanitize');
 /**
  * Build a Lead MongoDB filter from export/list query params (matches GET /leads filters).
  */
-function buildLeadExportFilter(query, defaults = {}) {
+function buildLeadExportFilter(rawQuery = {}, defaults = {}, reqUser = null) {
+  const query = mongoSanitize({ ...rawQuery });
   const filter = { ...defaults };
+
+  // Staff ownership scoping
+  if (reqUser && reqUser.role === 'staff') {
+    const staffUid = String(reqUser.id || reqUser._id || '');
+    if (query.assignedTo !== 'unassigned') {
+      filter.assignedTo = new mongoose.Types.ObjectId(staffUid);
+    }
+  }
 
   if (query.status && query.status !== 'All') {
     filter.status = query.status;
@@ -17,7 +26,7 @@ function buildLeadExportFilter(query, defaults = {}) {
     filter.bank = query.bank;
   }
   if (query.projectId && mongoose.Types.ObjectId.isValid(String(query.projectId))) {
-    filter.projectId = query.projectId;
+    filter.projectId = new mongoose.Types.ObjectId(String(query.projectId));
   }
   if (query.paymentStatus) {
     filter.paymentStatus = query.paymentStatus;
@@ -28,10 +37,12 @@ function buildLeadExportFilter(query, defaults = {}) {
   if (query.assignedToName) {
     filter.assignedToName = query.assignedToName;
   }
-  if (query.assignedTo === 'unassigned') {
-    filter.assignedTo = { $in: [null, undefined] };
-  } else if (query.assignedTo && mongoose.Types.ObjectId.isValid(String(query.assignedTo))) {
-    filter.assignedTo = query.assignedTo;
+  if (!filter.assignedTo) {
+    if (query.assignedTo === 'unassigned') {
+      filter.assignedTo = { $in: [null, undefined] };
+    } else if (query.assignedTo && mongoose.Types.ObjectId.isValid(String(query.assignedTo))) {
+      filter.assignedTo = new mongoose.Types.ObjectId(String(query.assignedTo));
+    }
   }
 
   if (query.search && String(query.search).trim()) {
@@ -41,15 +52,15 @@ function buildLeadExportFilter(query, defaults = {}) {
     filter.customerName = { $regex: escaped, $options: 'i' };
   }
 
-  const gte = query['createdAt[gte]'];
-  const lte = query['createdAt[lte]'];
+  const gte = query['createdAt[gte]'] || (query.createdAt && query.createdAt.$gte);
+  const lte = query['createdAt[lte]'] || (query.createdAt && query.createdAt.$lte);
   if (gte || lte) {
     filter.createdAt = {};
     if (gte) filter.createdAt.$gte = new Date(gte);
     if (lte) filter.createdAt.$lte = new Date(lte);
   }
 
-  return mongoSanitize(filter);
+  return filter;
 }
 
 module.exports = { buildLeadExportFilter };

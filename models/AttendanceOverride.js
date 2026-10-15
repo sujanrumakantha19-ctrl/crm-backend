@@ -21,9 +21,16 @@ const AttendanceOverrideSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    reason: {
+      type: String,
+      trim: true,
+    },
     overriddenBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
+    },
+    overriddenAt: {
+      type: Date,
     },
   },
   {

@@ -123,10 +123,20 @@ exports.createAttendance = asyncHandler(async (req, res, next) => {
   // If an unclosed session already exists with the EXACT same checkIn time, reject duplicate punch.
   if (req.user && req.user.role !== 'admin') {
     const duplicateActive = await Attendance.findOne({
-      staffId: targetStaffId,
-      date: todayDate,
-      checkIn: req.body.checkIn,
-      $or: [{ checkOut: { $exists: false } }, { checkOut: null }, { checkOut: '-' }, { checkOut: '—' }],
+      $and: [
+        { $or: [{ staffId: targetStaffId }, { userId: targetStaffId }] },
+        { date: todayDate },
+        { checkIn: req.body.checkIn },
+        {
+          $or: [
+            { checkOut: { $exists: false } },
+            { checkOut: null },
+            { checkOut: '' },
+            { checkOut: '-' },
+            { checkOut: '—' },
+          ],
+        },
+      ],
     });
 
     if (duplicateActive) {
@@ -205,14 +215,55 @@ exports.updateAttendance = asyncHandler(async (req, res, next) => {
       ? serverCheckOutTime
       : (req.body.checkOut || serverCheckOutTime);
 
-    allowedFields.checkOut = finalCheckOut;
+    let calculatedDuration = undefined;
     const inM = parseTimeToMinutes(cIn);
     const outM = parseTimeToMinutes(finalCheckOut);
     if (inM !== null && outM !== null) {
       let diff = outM - inM;
       if (diff < 0 && attendance.isOvernight) diff += 24 * 60;
-      allowedFields.duration = formatMinutesToDuration(Math.max(diff, 0));
+      calculatedDuration = formatMinutesToDuration(Math.max(diff, 0));
     }
+
+    const checkoutFields = {
+      checkOut: finalCheckOut,
+      duration: calculatedDuration || req.body.duration,
+      status: req.body.status || attendance.status,
+      activityType: req.body.activityType || attendance.activityType,
+      projectId: req.body.projectId !== undefined ? req.body.projectId : attendance.projectId,
+      projectName: req.body.projectName !== undefined ? req.body.projectName : attendance.projectName,
+      location: req.body.location !== undefined ? req.body.location : attendance.location,
+    };
+    Object.keys(checkoutFields).forEach(key => checkoutFields[key] === undefined && delete checkoutFields[key]);
+
+    // Atomic conditional checkout: only succeeds if session has not already been checked out
+    const updated = await Attendance.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        $or: [
+          { checkOut: { $exists: false } },
+          { checkOut: null },
+          { checkOut: '' },
+          { checkOut: '-' },
+          { checkOut: '—' },
+        ],
+      },
+      checkoutFields,
+      { returnDocument: 'after', runValidators: true }
+    );
+
+    if (!updated) {
+      // Session was already closed concurrently; return existing closed session idempotently
+      const closed = await Attendance.findById(req.params.id);
+      return res.status(200).json({
+        success: true,
+        data: closed,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: updated,
+    });
   }
 
   Object.keys(allowedFields).forEach(key => allowedFields[key] === undefined && delete allowedFields[key]);
@@ -443,32 +494,60 @@ exports.setAttendanceOverride = asyncHandler(async (req, res, next) => {
 
   // Active check-in override safeguard: if marking Absent for a staff member who currently has an open session on that date
   if (status === 'Absent') {
-    const activeSession = await Attendance.findOne({
-      $or: [{ staffId }, { userId: staffId }],
-      date,
-      $or: [{ checkOut: null }, { checkOut: '' }, { checkOut: '-' }, { checkOut: { $exists: false } }]
+    const activeSessions = await Attendance.find({
+      $and: [
+        { $or: [{ staffId }, { userId: staffId }] },
+        { date },
+        { checkIn: { $exists: true, $ne: null, $nin: ['', '-', '—'] } },
+        {
+          $or: [
+            { checkOut: { $exists: false } },
+            { checkOut: null },
+            { checkOut: '' },
+            { checkOut: '-' },
+            { checkOut: '—' },
+          ],
+        },
+      ],
     });
 
-    if (activeSession && confirmActiveOverride !== true) {
-      return res.status(409).json({
-        success: false,
-        code: 'ACTIVE_SESSION_OVERRIDE_CONFIRMATION_REQUIRED',
-        message: 'This staff member is currently checked in. Marking this day Absent will override attendance without checking them out. Confirmation is required.',
-        data: {
-          activeSessionId: activeSession._id,
-          checkIn: activeSession.checkIn,
-          date: activeSession.date
-        }
-      });
+    if (activeSessions.length > 0) {
+      const activeSessionIds = activeSessions.map(s => s._id.toString());
+      const checkInTimes = activeSessions.map(s => s.checkIn);
+
+      const acknowledgedIds = Array.isArray(req.body.acknowledgedSessionIds)
+        ? req.body.acknowledgedSessionIds.map(String)
+        : (req.body.confirmActiveOverride === true ? activeSessionIds : []);
+
+      const allAcknowledged = activeSessionIds.every(id => acknowledgedIds.includes(id));
+
+      if (!allAcknowledged) {
+        return res.status(409).json({
+          success: false,
+          code: 'ACTIVE_SESSION_OVERRIDE_CONFIRMATION_REQUIRED',
+          message: 'This staff member is currently checked in. Marking this day Absent will override attendance without checking them out. Confirmation is required.',
+          data: {
+            activeSessionId: activeSessions[0]._id,
+            activeSessionIds,
+            checkIn: activeSessions[0].checkIn,
+            checkInTimes,
+            date,
+          },
+        });
+      }
     }
   }
+
+  const reasonNote = (notes || req.body.reason || '').trim();
 
   const override = await AttendanceOverride.findOneAndUpdate(
     { staffId, date },
     {
       status,
-      notes: notes || '',
-      overriddenBy: req.user ? req.user.id : undefined,
+      notes: reasonNote,
+      reason: reasonNote,
+      overriddenBy: req.user ? (req.user.id || req.user._id) : undefined,
+      overriddenAt: new Date(),
     },
     { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );

@@ -25,8 +25,60 @@ const {
   buildOperationsMetrics,
 } = require('./reportController');
 
-exports.exportLeads = asyncHandler(async (req, res) => {
-  const filter = buildLeadExportFilter(req.query);
+exports.exportLeads = asyncHandler(async (req, res, next) => {
+  const ErrorResponse = require('../utils/errorResponse');
+  if (req.user && req.user.role === 'staff') {
+    const staffUid = String(req.user.id || req.user._id);
+    if (req.query.assignedTo && req.query.assignedTo !== 'unassigned' && String(req.query.assignedTo) !== staffUid) {
+      return next(new ErrorResponse('Staff members are only authorized to export their own assigned leads', 403));
+    }
+  }
+
+  const filter = buildLeadExportFilter(req.query, {}, req.user);
+
+  // If customer grouping requested (e.g. tab=Customer or groupBy=customer), aggregate unique customers
+  if (req.query.groupBy === 'customer' || (req.query.status === 'Customer' && req.query.groupBy !== 'none')) {
+    const { getCustomerIdentityExpression } = require('../utils/customerMetrics');
+    const groupKeyExpr = (req.query.status === 'Customer')
+      ? getCustomerIdentityExpression()
+      : {
+          $cond: [
+            { $eq: ['$status', 'Customer'] },
+            getCustomerIdentityExpression(),
+            { $concat: ['lead:', { $toString: '$_id' }] }
+          ]
+        };
+
+    const aggCursor = Lead.aggregate([
+      { $match: filter },
+      { $sort: { createdAt: -1, _id: -1 } },
+      {
+        $group: {
+          _id: groupKeyExpr,
+          firstDoc: { $first: '$$ROOT' },
+          relatedBookingCount: { $sum: 1 },
+          relatedLeadDisplayIds: { $addToSet: '$displayId' },
+        }
+      },
+      {
+        $replaceRoot: {
+          newRoot: {
+            $mergeObjects: [
+              '$firstDoc',
+              {
+                relatedBookingCount: '$relatedBookingCount',
+                plotBookingCount: '$relatedBookingCount',
+                relatedLeadDisplayIds: '$relatedLeadDisplayIds',
+              }
+            ]
+          }
+        }
+      },
+      { $sort: { createdAt: -1, _id: -1 } }
+    ]).cursor();
+
+    return streamCSV(req, res, aggCursor, configs.leads.columns, configs.leads.filename);
+  }
 
   const query = Lead.find(filter)
     .populate('assignedTo', 'name displayId')
