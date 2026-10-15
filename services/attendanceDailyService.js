@@ -51,13 +51,14 @@ async function queryDailyAttendance(options = {}) {
   }
 
   // 2. Date Range Resolution & Validation
+  const { isValidCalendarDateString } = require('../utils/dateIST');
   const today = getTodayDateStringIST();
   let startStr = today;
   let endStr = today;
 
   if (date) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      throw new ErrorResponse('Invalid date format. Expected YYYY-MM-DD', 400);
+    if (!isValidCalendarDateString(date)) {
+      throw new ErrorResponse('Invalid date format. Expected valid YYYY-MM-DD', 400);
     }
     startStr = date;
     endStr = date;
@@ -66,6 +67,9 @@ async function queryDailyAttendance(options = {}) {
       throw new ErrorResponse('Invalid month format. Expected YYYY-MM', 400);
     }
     const [y, m] = month.split('-').map(Number);
+    if (m < 1 || m > 12) {
+      throw new ErrorResponse('Invalid month format. Expected YYYY-MM', 400);
+    }
     const lastDay = new Date(y, m, 0).getDate();
     startStr = `${month}-01`;
     endStr = `${month}-${String(lastDay).padStart(2, '0')}`;
@@ -76,25 +80,52 @@ async function queryDailyAttendance(options = {}) {
     startStr = `${year}-01-01`;
     endStr = `${year}-12-31`;
   } else if (dateFrom || dateTo) {
-    if (dateFrom && !/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
-      throw new ErrorResponse('Invalid dateFrom format. Expected YYYY-MM-DD', 400);
+    if (dateFrom && !isValidCalendarDateString(dateFrom)) {
+      throw new ErrorResponse('Invalid dateFrom format. Expected valid YYYY-MM-DD', 400);
     }
-    if (dateTo && !/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
-      throw new ErrorResponse('Invalid dateTo format. Expected YYYY-MM-DD', 400);
+    if (dateTo && !isValidCalendarDateString(dateTo)) {
+      throw new ErrorResponse('Invalid dateTo format. Expected valid YYYY-MM-DD', 400);
     }
     startStr = dateFrom || dateTo;
     endStr = dateTo || dateFrom;
+  } else {
+    // Unfiltered query: Derive date bounds from recorded history in the database!
+    const histQuery = targetStaffId ? { staffId: targetStaffId } : {};
+    const [minAtt, maxAtt, minOvr, maxOvr] = await Promise.all([
+      Attendance.findOne(histQuery).sort('date').select('date').lean(),
+      Attendance.findOne(histQuery).sort('-date').select('date').lean(),
+      AttendanceOverride.findOne(histQuery).sort('date').select('date').lean(),
+      AttendanceOverride.findOne(histQuery).sort('-date').select('date').lean(),
+    ]);
+
+    const recordedDates = [minAtt?.date, maxAtt?.date, minOvr?.date, maxOvr?.date].filter(Boolean);
+    if (recordedDates.length > 0) {
+      recordedDates.sort();
+      startStr = recordedDates[0];
+      const maxRecorded = recordedDates[recordedDates.length - 1];
+      endStr = maxRecorded > today ? maxRecorded : today;
+    }
   }
 
   if (startStr > endStr) {
     throw new ErrorResponse('Start date cannot be after end date', 400);
   }
 
-  const startDateObj = new Date(startStr);
-  const endDateObj = new Date(endStr);
+  let startDateObj = new Date(startStr);
+  let endDateObj = new Date(endStr);
   const diffDays = Math.round((endDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24));
   if (diffDays > 366) {
-    throw new ErrorResponse('Date range cannot exceed 366 days', 400);
+    if (!date && !month && !year && !dateFrom && !dateTo) {
+      // For automatic unfiltered history, cap startStr to 366 days before endStr instead of failing
+      const cappedStart = new Date(endDateObj.getTime() - 365 * 24 * 60 * 60 * 1000);
+      const cy = cappedStart.getFullYear();
+      const cm = String(cappedStart.getMonth() + 1).padStart(2, '0');
+      const cd = String(cappedStart.getDate()).padStart(2, '0');
+      startStr = `${cy}-${cm}-${cd}`;
+      startDateObj = new Date(startStr);
+    } else {
+      throw new ErrorResponse('Date range cannot exceed 366 days', 400);
+    }
   }
 
   // 3. Load staff members

@@ -224,8 +224,10 @@ const advancedResults = (model, populate, searchFields = []) => asyncHandler(asy
           return next(new ErrorResponse('Staff members are only authorized to access their own assigned leads', 403));
         }
       }
-      // If not querying the Open Leads Pool, default to staff's own assigned leads
-      if (!req.query.assignedTo && req.query.status !== 'Open' && parsedQuery.assignedTo === undefined) {
+      // If querying the Open Leads Pool, default to unassigned leads; otherwise default to staff's own assigned leads
+      if (req.query.status === 'Open' && !req.query.assignedTo && parsedQuery.assignedTo === undefined) {
+        parsedQuery.assignedTo = { $in: [null, undefined] };
+      } else if (!req.query.assignedTo && req.query.status !== 'Open' && parsedQuery.assignedTo === undefined) {
         parsedQuery.assignedTo = new mongoose.Types.ObjectId(staffUid);
       }
     }

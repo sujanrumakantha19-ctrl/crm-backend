@@ -145,7 +145,10 @@ exports.getTask = asyncHandler(async (req, res, next) => {
   }
 
   const uid = staffUid(req);
-  if (uid && String(task.assignee) !== uid) {
+  const assigneeId = (task.assignee && typeof task.assignee === 'object' && (task.assignee._id || task.assignee.id))
+    ? String(task.assignee._id || task.assignee.id)
+    : String(task.assignee || '');
+  if (uid && assigneeId !== uid) {
     return next(new ErrorResponse('You are not allowed to view this task', 403));
   }
 
@@ -265,6 +268,10 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(req.body.project)) {
       return next(new ErrorResponse('Invalid project ID format', 400));
     }
+  }
+
+  if (req.user && req.user.role === 'partner') {
+    return next(new ErrorResponse('Channel partners are not allowed to update tasks', 403));
   }
 
   const isStaff = req.user && req.user.role === 'staff';
@@ -401,43 +408,47 @@ exports.updateTask = asyncHandler(async (req, res, next) => {
 
   task = updatedTask;
 
-  // If a comment was added, send notification
+  // If a comment was added, send notification (fault-tolerant, notification failure must not fail comment save)
   if (commentAdded) {
-    const Notification = require('../models/Notification');
-    const User = require('../models/User');
+    try {
+      const Notification = require('../models/Notification');
+      const User = require('../models/User');
 
-    if (req.user.role === 'staff') {
-      // Notify all admins
-      const admins = await User.find({ role: 'admin' });
-      for (const admin of admins) {
-        await Notification.create({
-          type: 'task_comment',
-          userId: admin._id,
-          entityId: task._id.toString(),
-          entityType: 'Task',
-          message: `Staff member ${req.user.name} commented on task: "${task.title}"`,
-          actorName: req.user.name,
-          isToday: true,
-          isRead: false,
-        });
-      }
-    } else if (req.user.role === 'admin') {
-      // Notify the task's assignee if it's a staff member
-      if (task.assignee) {
-        const assigneeUser = await User.findById(task.assignee);
-        if (assigneeUser && assigneeUser.role === 'staff') {
+      if (req.user.role === 'staff') {
+        // Notify all admins
+        const admins = await User.find({ role: 'admin' });
+        for (const admin of admins) {
           await Notification.create({
             type: 'task_comment',
-            userId: assigneeUser._id,
+            userId: admin._id,
             entityId: task._id.toString(),
             entityType: 'Task',
-            message: `Admin ${req.user.name} commented on task: "${task.title}"`,
+            message: `Staff member ${req.user.name} commented on task: "${task.title}"`,
             actorName: req.user.name,
             isToday: true,
             isRead: false,
           });
         }
+      } else if (req.user.role === 'admin') {
+        // Notify the task's assignee if it's a staff member
+        if (task.assignee) {
+          const assigneeUser = await User.findById(task.assignee);
+          if (assigneeUser && assigneeUser.role === 'staff') {
+            await Notification.create({
+              type: 'task_comment',
+              userId: assigneeUser._id,
+              entityId: task._id.toString(),
+              entityType: 'Task',
+              message: `Admin ${req.user.name} commented on task: "${task.title}"`,
+              actorName: req.user.name,
+              isToday: true,
+              isRead: false,
+            });
+          }
+        }
       }
+    } catch (notifErr) {
+      console.error('Failed to send task comment notification:', notifErr.message);
     }
   }
 

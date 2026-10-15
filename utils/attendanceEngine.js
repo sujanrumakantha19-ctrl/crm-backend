@@ -72,13 +72,19 @@ function parseDurationToMinutes(durationStr) {
 
   const hrMatch = trimmed.match(/(\d+(?:\.\d+)?)\s*h(?:ours?)?/i);
   if (hrMatch) {
-    totalMinutes += Math.round(parseFloat(hrMatch[1]) * 60);
+    totalMinutes += parseFloat(hrMatch[1]) * 60;
     matched = true;
   }
 
-  const minMatch = trimmed.match(/(\d+)\s*m(?:in(?:ute)?s?)?/i);
+  const minMatch = trimmed.match(/(\d+(?:\.\d+)?)\s*m(?:in(?:ute)?s?)?/i);
   if (minMatch) {
-    totalMinutes += parseInt(minMatch[1], 10);
+    totalMinutes += parseFloat(minMatch[1]);
+    matched = true;
+  }
+
+  const secMatch = trimmed.match(/(\d+(?:\.\d+)?)\s*s(?:ec(?:ond)?s?)?/i);
+  if (secMatch) {
+    totalMinutes += parseFloat(secMatch[1]) / 60;
     matched = true;
   }
 
@@ -87,7 +93,7 @@ function parseDurationToMinutes(durationStr) {
   // Decimal number alone e.g. "4.5"
   const num = parseFloat(trimmed);
   if (!isNaN(num) && num > 0) {
-    return Math.round(num * 60);
+    return num * 60;
   }
 
   return 0;
@@ -95,11 +101,14 @@ function parseDurationToMinutes(durationStr) {
 
 /**
  * Format minutes into standard "Xh Ym" or "Ym" format.
+ * Rounds only the displayed string so internal comparisons preserve millisecond precision.
  */
 function formatMinutesToDuration(totalMinutes) {
   if (!totalMinutes || totalMinutes <= 0) return '-';
-  const hrs = Math.floor(totalMinutes / 60);
-  const mins = totalMinutes % 60;
+  const rounded = Math.round(totalMinutes);
+  if (rounded <= 0) return '-';
+  const hrs = Math.floor(rounded / 60);
+  const mins = rounded % 60;
   if (hrs > 0 && mins > 0) {
     return `${hrs}h ${mins}m`;
   } else if (hrs > 0) {
@@ -135,6 +144,8 @@ function calculateSessionMinutes(session, sessionDate, todayDateStr) {
           isClosed: true,
           isInvalid: false,
           hasCheckIn: true,
+          inMs,
+          outMs,
           inMins: inMins !== null ? inMins : Math.floor(inMs / 60000) % (24 * 60),
           outMins: outMins !== null ? outMins : Math.floor(outMs / 60000) % (24 * 60),
         };
@@ -315,8 +326,13 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
 
     if (evalResult.isClosed) {
       if (!evalResult.isInvalid) {
-        if (evalResult.inMins !== undefined && evalResult.outMins !== undefined && evalResult.outMins >= evalResult.inMins) {
-          intervals.push([evalResult.inMins, evalResult.outMins]);
+        const baseMidnightMs = Date.parse(`${dateStr}T00:00:00+05:30`);
+        if (evalResult.inMs !== undefined && evalResult.outMs !== undefined && evalResult.outMs >= evalResult.inMs) {
+          intervals.push([evalResult.inMs, evalResult.outMs]);
+        } else if (evalResult.inMins !== undefined && evalResult.outMins !== undefined && evalResult.outMins >= evalResult.inMins) {
+          const startMs = !isNaN(baseMidnightMs) ? (baseMidnightMs + evalResult.inMins * 60000) : (evalResult.inMins * 60000);
+          const endMs = !isNaN(baseMidnightMs) ? (baseMidnightMs + evalResult.outMins * 60000) : (evalResult.outMins * 60000);
+          intervals.push([startMs, endMs]);
         } else {
           totalCompletedMinutes += evalResult.minutes;
         }
@@ -336,7 +352,7 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
     }
   });
 
-  // Calculate non-overlapping minutes from intervals
+  // Calculate non-overlapping minutes from intervals at millisecond precision
   if (intervals.length > 0) {
     intervals.sort((a, b) => a[0] - b[0]);
     const merged = [];
@@ -360,14 +376,22 @@ function calculateDailyAttendance(staffUser, dateStr, sessions = [], override = 
       }
       hasNeedsReview = true;
     }
-    const intervalMinutes = merged.reduce((sum, int) => sum + (int[1] - int[0]), 0);
-    totalCompletedMinutes += intervalMinutes;
+    const intervalMs = merged.reduce((sum, int) => sum + (int[1] - int[0]), 0);
+    totalCompletedMinutes += (intervalMs / (60 * 1000));
   }
 
   // Derive automatic calculated status before override
   let calculatedStatus = 'Absent';
   if (validSessions.length === 0) {
-    if (isBeforeJoining) calculatedStatus = 'Not Joined';
+    const legacyStatusSession = sessions.find(s => s.status === 'Present' || s.status === 'Half Day');
+    if (legacyStatusSession) {
+      calculatedStatus = legacyStatusSession.status;
+      if (totalCompletedMinutes === 0 && legacyStatusSession.duration) {
+        totalCompletedMinutes = parseDurationToMinutes(legacyStatusSession.duration);
+      } else if (totalCompletedMinutes === 0) {
+        totalCompletedMinutes = calculatedStatus === 'Present' ? 480 : 240;
+      }
+    } else if (isBeforeJoining) calculatedStatus = 'Not Joined';
     else if (dayOfWeek === 0) calculatedStatus = 'Weekly Off';
     else if (isFuture) calculatedStatus = 'Scheduled';
     else calculatedStatus = 'Absent';

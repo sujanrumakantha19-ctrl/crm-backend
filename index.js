@@ -189,6 +189,22 @@ const server = app.listen(PORT, () => {
   } catch (err) {
     logger.error(`Failed to start cron jobs: ${err.message}`);
   }
+
+  // Resume any pending membership recoveries after restart
+  try {
+    const { processPendingRecoveries } = require('./services/groupMembershipService');
+    processPendingRecoveries()
+      .then(res => {
+        if (res && (res.processed > 0 || res.conflicts > 0)) {
+          logger.info(`[RECOVERY] Processed ${res.processed} pending membership recoveries (${res.conflicts} conflicts recorded)`);
+        }
+      })
+      .catch(err => {
+        logger.error(`Failed to process pending membership recoveries: ${err.message}`);
+      });
+  } catch (err) {
+    logger.error(`Error initiating membership recovery on startup: ${err.message}`);
+  }
 });
 
 // ─── Graceful Shutdown ─────────────────────────────────────────────────

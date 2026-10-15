@@ -13,6 +13,7 @@ const {
   getTodayPresence,
   getDailyAttendance,
   setAttendanceOverride,
+  getActiveAttendance,
 } = require('../controllers/attendanceController');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -32,6 +33,7 @@ router.use(protect, authorize('admin', 'staff'));
 
 // Specific routes BEFORE parameterized routes
 router.route('/presence/today').get(authorize('admin'), getTodayPresence);
+router.route('/active').get(getActiveAttendance);
 router.route('/daily').get(getDailyAttendance);
 router.route('/override').post(authorize('admin'), setAttendanceOverride);
 router.route('/today').get(getTodayAttendance);
@@ -47,6 +49,6 @@ router
   .route('/:id')
   .get(getAttendance)
   .put(updateAttendance)
-  .delete(deleteAttendance);
+  .delete(authorize('admin'), deleteAttendance);
 
 module.exports = router;

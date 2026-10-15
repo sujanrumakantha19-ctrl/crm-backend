@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
 const User = require('../models/User');
@@ -38,6 +39,18 @@ exports.createUser = asyncHandler(async (req, res, next) => {
     generatedPassword = true;
   }
 
+  // Pre-validate target group if groupId specified on user creation
+  if (req.body.groupId && req.body.groupId !== 'none' && req.body.groupId !== '') {
+    const Group = require('../models/Group');
+    if (!mongoose.Types.ObjectId.isValid(String(req.body.groupId))) {
+      return next(new ErrorResponse('Invalid target group ID format', 400));
+    }
+    const targetGroup = await Group.findById(req.body.groupId);
+    if (!targetGroup) {
+      return next(new ErrorResponse(`Target group not found with id of ${req.body.groupId}`, 404));
+    }
+  }
+
   const allowedFields = {
     name: req.body.name,
     initials: req.body.initials,
@@ -56,6 +69,18 @@ exports.createUser = asyncHandler(async (req, res, next) => {
   Object.keys(allowedFields).forEach(key => allowedFields[key] === undefined && delete allowedFields[key]);
 
   const user = await User.create(allowedFields);
+
+  // Sync group membership if groupId was assigned on creation
+  if (user.groupId && user.role === 'staff') {
+    const { assignUserToGroup } = require('../services/groupMembershipService');
+    try {
+      await assignUserToGroup(user._id, user.groupId);
+    } catch (err) {
+      // Prevent partially persisted user if group assignment fails
+      await User.findByIdAndDelete(user._id);
+      throw err;
+    }
+  }
 
   // Send credentials email (best-effort — never blocks or fails the request)
   let emailSent = false;
@@ -96,6 +121,22 @@ exports.createUser = asyncHandler(async (req, res, next) => {
 // @route   PUT /api/v1/users/:id
 // @access  Private/Admin
 exports.updateUser = asyncHandler(async (req, res, next) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`User not found with id of ${req.params.id}`, 404));
+  }
+
+  // Pre-validate target group if groupId is being updated
+  if (req.body.groupId !== undefined && req.body.groupId !== null && req.body.groupId !== '' && req.body.groupId !== 'none') {
+    const Group = require('../models/Group');
+    if (!mongoose.Types.ObjectId.isValid(String(req.body.groupId))) {
+      return next(new ErrorResponse('Invalid target group ID format', 400));
+    }
+    const targetGroup = await Group.findById(req.body.groupId);
+    if (!targetGroup) {
+      return next(new ErrorResponse(`Target group not found with id of ${req.body.groupId}`, 404));
+    }
+  }
+
   const allowedFields = {
     name: req.body.name,
     initials: req.body.initials,
@@ -104,7 +145,6 @@ exports.updateUser = asyncHandler(async (req, res, next) => {
     phone: req.body.phone,
     gender: req.body.gender,
     avatarBg: req.body.avatarBg,
-    groupId: req.body.groupId,
     dob: req.body.dob,
     isActive: req.body.isActive,
   };
@@ -126,9 +166,11 @@ exports.updateUser = asyncHandler(async (req, res, next) => {
     await assignUserToGroup(user._id, req.body.groupId || null);
   }
 
+  const freshUser = await User.findById(user._id).select('-password');
+
   res.status(200).json({
     success: true,
-    data: user,
+    data: freshUser,
   });
 });
 

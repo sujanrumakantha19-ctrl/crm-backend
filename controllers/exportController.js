@@ -296,8 +296,14 @@ exports.exportAttendance = asyncHandler(async (req, res, next) => {
 });
 
 exports.exportTasks = asyncHandler(async (req, res) => {
+  if (req.user && req.user.role === 'partner') {
+    return res.status(403).json({ success: false, message: 'Channel partners are not authorized to export tasks' });
+  }
+
   const filter = {};
-  if (req.query.assignedTo && req.query.assignedTo !== 'all' && req.query.assignedTo !== 'All') {
+  if (req.user && req.user.role === 'staff') {
+    filter.assignee = req.user.id || req.user._id;
+  } else if (req.query.assignedTo && req.query.assignedTo !== 'all' && req.query.assignedTo !== 'All') {
     filter.assignee = req.query.assignedTo;
   }
   if (req.query.project && req.query.project !== 'All') {
@@ -446,7 +452,7 @@ exports.exportReports = asyncHandler(async (req, res) => {
       return;
     }
     case 'attendance': {
-      const { rows } = await buildAttendanceReportRows(filterParams);
+      const { rows } = await buildAttendanceReportRows({ ...filterParams, paginate: false });
       streamArrayCSV(req, res, rows, configs.reportAttendance.columns, configs.reportAttendance.filename);
       return;
     }

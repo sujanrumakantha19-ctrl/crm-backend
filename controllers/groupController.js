@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
 const Group = require('../models/Group');
@@ -240,11 +241,35 @@ exports.getGroup = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/groups
 // @access  Private/Admin
 exports.createGroup = asyncHandler(async (req, res, next) => {
-  const group = await Group.create(req.body);
+  const { name, description, members } = req.body;
+  if (!name || !String(name).trim()) {
+    return next(new ErrorResponse('Please provide a group name', 400));
+  }
+
+  // Create group entity first with empty members list
+  const group = await Group.create({
+    name: String(name).trim(),
+    description,
+    members: [],
+  });
+
+  // If initial members were provided, route through membership synchronization
+  if (Array.isArray(members) && members.length > 0) {
+    const { syncGroupMembers } = require('../services/groupMembershipService');
+    try {
+      await syncGroupMembers(group._id, members);
+    } catch (err) {
+      // Rollback group creation if initial member sync fails
+      await Group.findByIdAndDelete(group._id);
+      throw err;
+    }
+  }
+
+  const populatedGroup = await Group.findById(group._id).populate('members', 'name initials role displayId');
 
   res.status(201).json({
     success: true,
-    data: group,
+    data: populatedGroup,
   });
 });
 
@@ -252,39 +277,33 @@ exports.createGroup = asyncHandler(async (req, res, next) => {
 // @route   PUT /api/v1/groups/:id
 // @access  Private/Admin
 exports.updateGroup = asyncHandler(async (req, res, next) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid group ID format: ${req.params.id}`, 400));
+  }
+
   let group = await Group.findById(req.params.id);
 
   if (!group) {
     return next(new ErrorResponse(`Group not found with id of ${req.params.id}`, 404));
   }
 
+  const { syncGroupMembers } = require('../services/groupMembershipService');
+
+  if (req.body.members !== undefined) {
+    await syncGroupMembers(group._id, req.body.members);
+  }
+
   const allowedFields = {
     name: req.body.name,
     description: req.body.description,
-    members: req.body.members,
   };
 
   Object.keys(allowedFields).forEach(key => allowedFields[key] === undefined && delete allowedFields[key]);
 
-  if (allowedFields.members) {
-    const memberStrings = allowedFields.members.map(m => String(m));
-    const oldMembers = group.members.map(m => String(m));
-    const added = memberStrings.filter(m => !oldMembers.includes(m));
-    const removed = oldMembers.filter(m => !memberStrings.includes(m));
-
-    const User = require('../models/User');
-    if (added.length > 0) {
-      await User.updateMany({ _id: { $in: added } }, { groupId: group._id });
-    }
-    if (removed.length > 0) {
-      await User.updateMany({ _id: { $in: removed } }, { groupId: null });
-    }
-  }
-
   group = await Group.findByIdAndUpdate(req.params.id, allowedFields, {
     returnDocument: 'after',
     runValidators: true,
-  });
+  }).populate('members', 'name initials role displayId');
 
   res.status(200).json({
     success: true,
@@ -296,17 +315,19 @@ exports.updateGroup = asyncHandler(async (req, res, next) => {
 // @route   DELETE /api/v1/groups/:id
 // @access  Private/Admin
 exports.deleteGroup = asyncHandler(async (req, res, next) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid group ID format: ${req.params.id}`, 400));
+  }
+
   const group = await Group.findById(req.params.id);
 
   if (!group) {
     return next(new ErrorResponse(`Group not found with id of ${req.params.id}`, 404));
   }
 
-  // Cascade cleanup: remove groupId from all members
-  const User = require('../models/User');
-  await User.updateMany({ groupId: group._id }, { groupId: null });
-
-  await group.deleteOne();
+  // Cascade cleanup with membership tokens and versions
+  const { deleteGroupWithMembership } = require('../services/groupMembershipService');
+  await deleteGroupWithMembership(group._id);
 
   res.status(200).json({
     success: true,
@@ -319,21 +340,32 @@ exports.deleteGroup = asyncHandler(async (req, res, next) => {
 // @access  Private/Admin
 exports.addMember = asyncHandler(async (req, res, next) => {
   const groupId = req.params.id;
+  if (!mongoose.Types.ObjectId.isValid(groupId)) {
+    return next(new ErrorResponse(`Invalid group ID format: ${groupId}`, 400));
+  }
+
   const group = await Group.findById(groupId);
 
   if (!group) {
     return next(new ErrorResponse(`Group not found with id of ${groupId}`, 404));
   }
 
-  const { userId, expectedCurrentGroupId } = req.body;
+  let { userId, expectedCurrentGroupId } = req.body;
 
-  if (!userId) {
-    return next(new ErrorResponse('Please provide a userId', 400));
+  if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) {
+    return next(new ErrorResponse('Please provide a valid userId', 400));
+  }
+
+  const { assignUserToGroup, normalizeExpectedGroupId } = require('../services/groupMembershipService');
+  const normalizedExpected = normalizeExpectedGroupId(expectedCurrentGroupId);
+
+  if (normalizedExpected && !mongoose.Types.ObjectId.isValid(normalizedExpected)) {
+    return next(new ErrorResponse('Invalid expected current group ID format', 400));
   }
 
   // If already in this group:
   if (group.members.some(m => String(m) === String(userId))) {
-    if (expectedCurrentGroupId !== undefined && String(expectedCurrentGroupId) === String(group._id)) {
+    if (normalizedExpected !== undefined && String(normalizedExpected) === String(group._id)) {
       return res.status(200).json({
         success: true,
         data: group,
@@ -342,8 +374,7 @@ exports.addMember = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('User already in group', 400));
   }
 
-  const { assignUserToGroup } = require('../services/groupMembershipService');
-  const result = await assignUserToGroup(userId, groupId, { expectedCurrentGroupId });
+  const result = await assignUserToGroup(userId, groupId, { expectedCurrentGroupId: normalizedExpected });
 
   res.status(200).json({
     success: true,
@@ -355,7 +386,16 @@ exports.addMember = asyncHandler(async (req, res, next) => {
 // @route   DELETE /api/v1/groups/:id/members/:userId
 // @access  Private/Admin
 exports.removeMember = asyncHandler(async (req, res, next) => {
-  const groupId = req.params.id;
+  const { id: groupId, userId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(groupId)) {
+    return next(new ErrorResponse(`Invalid group ID format: ${groupId}`, 400));
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return next(new ErrorResponse(`Invalid user ID format: ${userId}`, 400));
+  }
+
   const group = await Group.findById(groupId);
 
   if (!group) {
@@ -363,7 +403,7 @@ exports.removeMember = asyncHandler(async (req, res, next) => {
   }
 
   const { removeUserFromGroup } = require('../services/groupMembershipService');
-  await removeUserFromGroup(req.params.userId, groupId);
+  await removeUserFromGroup(userId, groupId);
 
   const updatedGroup = await Group.findById(groupId).populate('members', 'name initials role displayId');
   res.status(200).json({

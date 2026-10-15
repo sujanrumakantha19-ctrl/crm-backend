@@ -75,7 +75,7 @@ AttendanceSchema.index(
 AttendanceSchema.pre('validate', function () {
   const isClosed = !!(this.checkOut && this.checkOut !== '-' && this.checkOut !== '—');
   const hasCheckIn = !!(this.checkIn && this.checkIn !== '-' && this.checkIn !== '—');
-  if (isClosed || !hasCheckIn) {
+  if (isClosed || !hasCheckIn || this.status === 'Absent') {
     this.isActive = false;
   }
 });

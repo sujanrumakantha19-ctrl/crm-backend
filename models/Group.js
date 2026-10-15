@@ -15,6 +15,15 @@ const GroupSchema = new mongoose.Schema(
         ref: 'User',
       },
     ],
+    membershipVersion: {
+      type: Number,
+      default: 0,
+    },
+    membershipOperationToken: {
+      type: String,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,

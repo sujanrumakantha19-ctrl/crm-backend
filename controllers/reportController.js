@@ -809,7 +809,7 @@ async function buildStaffReportRows({ startDate, endDate, skip, limit, reportVie
   return { total, rows };
 }
 
-async function buildAttendanceReportRows({ startDate, endDate, startDateStr, endDateStr, skip = 0, limit = 50, status, staffId }) {
+async function buildAttendanceReportRows({ startDate, endDate, startDateStr, endDateStr, skip = 0, limit = 50, status, staffId, paginate = true }) {
   const { queryDailyAttendance } = require('../services/attendanceDailyService');
   const startStr = startDateStr || (startDate ? new Date(startDate.getTime() + 19800000).toISOString().slice(0, 10) : null);
   const endStr = endDateStr || (endDate ? new Date(endDate.getTime() + 19800000).toISOString().slice(0, 10) : null);
@@ -826,10 +826,11 @@ async function buildAttendanceReportRows({ startDate, endDate, startDateStr, end
     page: safePage,
     limit: safeLimit,
     userRole: 'admin',
-    paginate: true,
+    paginate,
   });
 
-  const rows = result.data.map(r => ({
+  const sourceData = paginate ? result.data : (result.allRecords || result.data);
+  const rows = sourceData.map(r => ({
     _id: `${r.staffId}_${r.date}`,
     staffId: r.staffId,
     staffName: r.staffName,

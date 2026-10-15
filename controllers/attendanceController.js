@@ -149,14 +149,17 @@ exports.createAttendance = asyncHandler(async (req, res, next) => {
     const activeSession = await Attendance.findOne({
       $and: [
         { $or: [{ staffId: targetStaffId }, { userId: targetStaffId }] },
+        { status: { $ne: 'Absent' } },
+        { checkIn: { $exists: true, $nin: [null, '', '-', '—'] } },
         {
           $or: [
             { isActive: true },
-            { checkOut: { $exists: false } },
-            { checkOut: null },
-            { checkOut: '' },
-            { checkOut: '-' },
-            { checkOut: '—' },
+            {
+              $and: [
+                { isActive: { $ne: false } },
+                { $or: [{ checkOut: { $exists: false } }, { checkOut: null }, { checkOut: '' }] }
+              ]
+            }
           ],
         },
       ],
@@ -185,6 +188,35 @@ exports.createAttendance = asyncHandler(async (req, res, next) => {
   }
 });
 
+// @desc    Get current user's genuine active attendance session
+// @route   GET /api/v1/attendance/active
+// @access  Private (Admin/Staff)
+exports.getActiveAttendance = asyncHandler(async (req, res, next) => {
+  const staffId = req.user.id || req.user._id;
+  const activeRecord = await Attendance.findOne({
+    $and: [
+      { $or: [{ staffId }, { userId: staffId }] },
+      { isActive: true },
+      { status: { $ne: 'Absent' } },
+      { checkIn: { $exists: true, $nin: [null, '', '-', '—'] } },
+      {
+        $or: [
+          { checkOut: { $exists: false } },
+          { checkOut: null },
+          { checkOut: '' },
+          { checkOut: '-' },
+          { checkOut: '—' },
+        ],
+      },
+    ],
+  }).populate('projectId', 'name displayId location').sort('-createdAt');
+
+  res.status(200).json({
+    success: true,
+    data: activeRecord || null,
+  });
+});
+
 // @desc    Update attendance record
 // @route   PUT /api/v1/attendance/:id
 // @access  Private
@@ -195,6 +227,7 @@ exports.updateAttendance = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Attendance not found with id of ${req.params.id}`, 404));
   }
 
+  const isStaff = req.user && req.user.role === 'staff';
   const uid = staffUid(req);
   if (uid) {
     if (String(attendance.staffId) !== uid) {
@@ -202,6 +235,27 @@ exports.updateAttendance = asyncHandler(async (req, res, next) => {
     }
     // Staff may only touch their own check-in/out details, never reassign
     delete req.body.staffId;
+  }
+
+  // Staff Authority Hardening:
+  // Staff cannot directly alter date, checkIn, duration, or status, and cannot reopen closed sessions with checkOut: '-'
+  if (isStaff) {
+    if (req.body.checkOut === '-' || req.body.checkOut === '—') {
+      return next(new ErrorResponse('Staff members are not allowed to reopen closed attendance sessions', 403));
+    }
+    if (req.body.date !== undefined && req.body.date !== attendance.date) {
+      return next(new ErrorResponse('Staff members cannot modify attendance date', 403));
+    }
+    if (req.body.checkIn !== undefined && req.body.checkIn !== attendance.checkIn) {
+      return next(new ErrorResponse('Staff members cannot modify check-in time', 403));
+    }
+    const isCheckingOut = req.body.checkOut && req.body.checkOut !== '-' && req.body.checkOut !== '—';
+    if (!isCheckingOut && req.body.duration !== undefined && req.body.duration !== attendance.duration) {
+      return next(new ErrorResponse('Staff members cannot directly set duration', 403));
+    }
+    if (req.body.status !== undefined && req.body.status !== attendance.status) {
+      return next(new ErrorResponse('Staff members cannot directly modify attendance status', 403));
+    }
   }
 
   const allowedFields = {
@@ -394,6 +448,11 @@ exports.getAttendanceByStaff = asyncHandler(async (req, res, next) => {
 // @route   GET /api/v1/attendance/date/:date
 // @access  Public
 exports.getAttendanceByDate = asyncHandler(async (req, res, next) => {
+  const { isValidCalendarDateString } = require('../utils/dateIST');
+  if (!isValidCalendarDateString(req.params.date)) {
+    return next(new ErrorResponse('Invalid date format. Expected valid YYYY-MM-DD', 400));
+  }
+
   const page = parseInt(req.query.page, 10) || 1;
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
   const skip = (page - 1) * limit;
@@ -491,7 +550,7 @@ exports.getDailyAttendance = asyncHandler(async (req, res, next) => {
     limit: req.query.limit,
     userRole: req.user ? req.user.role : 'staff',
     requestingUserId: req.user ? (req.user.id || req.user._id) : null,
-    paginate: true,
+    paginate: req.query.paginate !== 'false' && req.query.paginate !== false,
   });
 
   res.status(200).json({
@@ -508,6 +567,11 @@ exports.setAttendanceOverride = asyncHandler(async (req, res, next) => {
 
   if (!staffId || !date) {
     return next(new ErrorResponse('Please provide staffId and date', 400));
+  }
+
+  const { isValidCalendarDateString } = require('../utils/dateIST');
+  if (!isValidCalendarDateString(date)) {
+    return next(new ErrorResponse('Invalid calendar date for attendance override. Expected valid YYYY-MM-DD', 400));
   }
 
   const { queryDailyAttendance } = require('../services/attendanceDailyService');
@@ -574,6 +638,7 @@ exports.setAttendanceOverride = asyncHandler(async (req, res, next) => {
         return res.status(409).json({
           success: false,
           code: 'ACTIVE_SESSION_OVERRIDE_CONFIRMATION_REQUIRED',
+          error: 'This staff member is currently checked in. Marking this day Absent requires explicit acknowledgement of all active session IDs.',
           message: 'This staff member is currently checked in. Marking this day Absent requires explicit acknowledgement of all active session IDs.',
           data: {
             activeSessionId: activeSessions[0]._id,

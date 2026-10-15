@@ -3,6 +3,7 @@ const { buildTestApp, createAdminUser, createTestUser } = require('../helpers');
 const Attendance = require('../../models/Attendance');
 const User = require('../../models/User');
 const { markAbsentForDate } = require('../../utils/cronJobs');
+const { getTodayDateStringIST } = require('../../utils/dateIST');
 
 const app = buildTestApp();
 
@@ -463,6 +464,135 @@ describe('Attendance Controller', () => {
       const session = await Attendance.findById(openSession._id);
       expect(session).not.toBeNull();
       expect(session.checkOut).toBe('-');
+    });
+
+    it('should return all rows without 50-row cap when paginate=false for a month with 62 rows', async () => {
+      const staff2 = await User.create({
+        name: 'Staff2', initials: 'S2', role: 'staff',
+        email: `s2_${Date.now()}@x.com`, phone: '456', password: 'password123',
+      });
+
+      // 31 days for 2 staff = 62 daily records
+      const res = await request(app)
+        .get('/api/v1/attendance/daily?month=2024-05&paginate=false')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(62);
+      expect(res.body.pagination).toBeUndefined();
+    });
+
+    it('should allow punch-in when user has an Absent record earlier that day or on previous date', async () => {
+      // 1. Create a status-only Absent record for today
+      const todayIST = getTodayDateStringIST();
+      await Attendance.create({
+        staffId: staffUser._id,
+        staffName: staffUser.name,
+        date: todayIST,
+        checkIn: '-',
+        checkOut: '-',
+        status: 'Absent',
+        isActive: false,
+        role: 'staff',
+      });
+
+      // 2. Punch in today: should NOT be blocked by the Absent record
+      const punchRes = await request(app)
+        .post('/api/v1/attendance')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ activityType: 'On Duty' });
+
+      expect(punchRes.status).toBe(201);
+      expect(punchRes.body.success).toBe(true);
+      expect(punchRes.body.data.status).toBe('Present');
+      expect(punchRes.body.data.isActive).toBe(true);
+
+      // 3. Second punch-in while genuine active session exists MUST be blocked
+      const blockedRes = await request(app)
+        .post('/api/v1/attendance')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ activityType: 'Office' });
+
+      expect(blockedRes.status).toBe(400);
+      expect(blockedRes.body.error).toMatch(/active attendance session already exists/i);
+    });
+
+    it('should filter by status before pagination on daily attendance endpoint', async () => {
+      await Attendance.create({
+        staffId: staffUser._id,
+        staffName: staffUser.name,
+        date: '2024-06-01',
+        checkIn: '09:00',
+        checkOut: '18:00',
+        duration: '9h 0m',
+        status: 'Present',
+        isActive: false,
+      });
+
+      const res = await request(app)
+        .get(`/api/v1/attendance/daily?staffId=${staffUser._id}&month=2024-06&status=Present&paginate=true&limit=10&page=1`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.every(r => r.status === 'Present')).toBe(true);
+      expect(res.body.pagination.total).toBe(res.body.data.length);
+    });
+
+    it('should filter by status before pagination across multiple pages with matching records on later dates', async () => {
+      const records = [];
+      for (let day = 1; day <= 5; day++) {
+        records.push({
+          staffId: staffUser._id,
+          staffName: staffUser.name,
+          date: `2024-06-0${day}`,
+          checkIn: '09:00',
+          checkOut: '14:00',
+          duration: '5h 0m',
+          status: 'Half Day',
+          isActive: false,
+        });
+      }
+      for (let day = 6; day <= 10; day++) {
+        records.push({
+          staffId: staffUser._id,
+          staffName: staffUser.name,
+          date: `2024-06-${day < 10 ? '0' + day : day}`,
+          checkIn: '09:00',
+          checkOut: '18:00',
+          duration: '9h 0m',
+          status: 'Present',
+          isActive: false,
+        });
+      }
+      await Attendance.create(records);
+
+      const res = await request(app)
+        .get(`/api/v1/attendance/daily?staffId=${staffUser._id}&month=2024-06&status=Present&paginate=true&limit=2&page=1`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBe(2);
+      expect(res.body.data.every(r => r.status === 'Present')).toBe(true);
+      expect(res.body.pagination.total).toBe(5);
+      expect(res.body.pagination.pages).toBe(3);
+    });
+
+    it('should reject manual override with blank or missing reason with 400', async () => {
+      const res = await request(app)
+        .post('/api/v1/attendance/override')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          staffId: staffUser._id,
+          date: '2024-06-05',
+          status: 'Present',
+          reason: '   ',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/non-blank reason/i);
     });
   });
 });

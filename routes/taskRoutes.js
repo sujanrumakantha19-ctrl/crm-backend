@@ -17,23 +17,25 @@ const { protect, authorize } = require('../middleware/auth');
 const advancedResults = require('../middleware/advancedResults');
 const Task = require('../models/Task');
 
+router.use(protect);
+
 // Specific routes BEFORE parameterized routes
-router.route('/status/:status').get(protect, getTasksByStatus);
-router.route('/priority/:priority').get(protect, getTasksByPriority);
-router.route('/assignee/:assigneeId').get(protect, getTasksByAssignee);
-router.route('/project/:projectId').get(protect, getTasksByProject);
+router.route('/status/:status').get(getTasksByStatus);
+router.route('/priority/:priority').get(getTasksByPriority);
+router.route('/assignee/:assigneeId').get(getTasksByAssignee);
+router.route('/project/:projectId').get(getTasksByProject);
 
 router
   .route('/')
-  .get(protect, advancedResults(Task, [
+  .get(advancedResults(Task, [
     { path: 'assignee', select: 'name initials role' },
   ]), getTasks)
-  .post(protect, createTask);
+  .post(createTask);
 
 router
   .route('/:id')
-  .get(protect, getTask)
-  .put(protect, updateTask)
-  .delete(protect, authorize('admin'), deleteTask);
+  .get(getTask)
+  .put(updateTask)
+  .delete(authorize('admin'), deleteTask);
 
 module.exports = router;

@@ -119,6 +119,79 @@ describe('Attendance Engine Unit Tests', () => {
       expect(res.formattedDuration).toBe('8h 30m');
     });
 
+    it('should preserve fractional seconds across multiple sessions and classify 480m + 2s as Present', () => {
+      const dateStr = '2024-05-10';
+      // Two 4h 0m 1s sessions:
+      // Session 1: 09:00:00 to 13:00:01 (14401 seconds = 240.0167 min)
+      // Session 2: 14:00:00 to 18:00:01 (14401 seconds = 240.0167 min)
+      // Total = 480.0333 min > 480 min => Present!
+      const sessions = [
+        {
+          checkIn: '09:00:00',
+          checkOut: '13:00:01',
+          checkInTime: new Date('2024-05-10T09:00:00.000Z'),
+          checkOutTime: new Date('2024-05-10T13:00:01.000Z'),
+        },
+        {
+          checkIn: '14:00:00',
+          checkOut: '18:00:01',
+          checkInTime: new Date('2024-05-10T14:00:00.000Z'),
+          checkOutTime: new Date('2024-05-10T18:00:01.000Z'),
+        },
+      ];
+
+      const res = calculateDailyAttendance(mockStaff, dateStr, sessions);
+      expect(res.status).toBe('Present');
+      expect(res.totalMinutes).toBeGreaterThan(480);
+      expect(res.formattedDuration).toBe('8h 0m'); // Displayed string rounded
+    });
+
+    it('should classify exactly 480.000 minutes as Half Day per agreed threshold rule', () => {
+      const dateStr = '2024-05-10';
+      const sessions = [
+        {
+          checkIn: '09:00',
+          checkOut: '17:00',
+          checkInTime: new Date('2024-05-10T09:00:00.000Z'),
+          checkOutTime: new Date('2024-05-10T17:00:00.000Z'),
+        },
+      ];
+
+      const res = calculateDailyAttendance(mockStaff, dateStr, sessions);
+      expect(res.totalMinutes).toBe(480);
+      expect(res.status).toBe('Half Day');
+      expect(res.formattedDuration).toBe('8h 0m');
+    });
+
+    it('should classify 239m 59s as Absent and 240m 0s as Half Day', () => {
+      const dateStr = '2024-05-10';
+      // 3 hours, 59 minutes, 59 seconds: 14399 seconds = 239.9833 min < 240 min => Absent
+      const sessionsAbsent = [
+        {
+          checkIn: '09:00',
+          checkOut: '12:59',
+          checkInTime: new Date('2024-05-10T09:00:00.000Z'),
+          checkOutTime: new Date('2024-05-10T12:59:59.000Z'),
+        },
+      ];
+      const resAbsent = calculateDailyAttendance(mockStaff, dateStr, sessionsAbsent);
+      expect(resAbsent.totalMinutes).toBeLessThan(240);
+      expect(resAbsent.status).toBe('Absent');
+
+      // Exactly 4 hours: 240.0 min => Half Day
+      const sessionsHalfDay = [
+        {
+          checkIn: '09:00',
+          checkOut: '13:00',
+          checkInTime: new Date('2024-05-10T09:00:00.000Z'),
+          checkOutTime: new Date('2024-05-10T13:00:00.000Z'),
+        },
+      ];
+      const resHalfDay = calculateDailyAttendance(mockStaff, dateStr, sessionsHalfDay);
+      expect(resHalfDay.totalMinutes).toBe(240);
+      expect(resHalfDay.status).toBe('Half Day');
+    });
+
     it('should classify total work < 4h as Absent', () => {
       const dateStr = '2024-05-10';
       const sessions = [

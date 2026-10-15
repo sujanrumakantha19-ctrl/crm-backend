@@ -63,6 +63,15 @@ const UserSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Group',
     },
+    membershipVersion: {
+      type: Number,
+      default: 0,
+    },
+    membershipOperationToken: {
+      type: String,
+      default: null,
+      index: true,
+    },
     dob: {
       type: Date,
     },
