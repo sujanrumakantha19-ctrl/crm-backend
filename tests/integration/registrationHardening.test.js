@@ -5,6 +5,7 @@ const Plot = require('../../models/Plot');
 const Project = require('../../models/Project');
 const Lead = require('../../models/Lead');
 const User = require('../../models/User');
+const { attachRelatedBookings } = require('../../utils/plotCustomerBookings');
 
 const app = buildTestApp();
 
@@ -1325,6 +1326,172 @@ describe('Registration Search, Filters & Grouped Pagination Hardening', () => {
         expect(plotsP2).not.toContain('PAG-B1');
         expect(plotsP2).not.toContain('PAG-B2');
       }
+    });
+
+    it('7. should discover a 25-plot connection (>10 rounds) when searching for the first plot, producing identical relatedBooking sets to unfiltered requests', async () => {
+      const chainProj = await Project.create({
+        name: 'Chain Discovery Project',
+        location: 'Coimbatore West',
+        status: 'Active',
+        displayId: 'PROJ-CHAIN',
+        totalPlots: 50,
+        totalLandArea: 10,
+        landAreaUnit: 'Acres',
+      });
+
+      // Create 12 alternating leads to form a 25-plot chain
+      const chainLeads = [];
+      for (let i = 0; i < 12; i++) {
+        const ld = await Lead.create({
+          customerName: `Chain Cust ${i + 1}`,
+          phone: `98888000${String(i + 1).padStart(2, '0')}`,
+          displayId: `L-CH${i + 1}`,
+        });
+        chainLeads.push(ld);
+      }
+
+      const chainPlots = [];
+      for (let i = 1; i <= 25; i++) {
+        const plotNumber = `CHAIN-${String(i).padStart(2, '0')}`;
+        let phoneNum = 1;
+        let leadNum = null;
+
+        if (i === 1) {
+          phoneNum = 1;
+        } else if (i % 2 === 0) {
+          phoneNum = i / 2;
+          leadNum = i / 2 - 1;
+        } else {
+          leadNum = (i - 3) / 2;
+          phoneNum = (i + 1) / 2;
+        }
+
+        const phone = `98888000${String(phoneNum).padStart(2, '0')}`;
+        const bookedBy = {
+          name: 'Chain Customer',
+          phone,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        };
+
+        if (leadNum !== null && leadNum < chainLeads.length) {
+          bookedBy.leadId = chainLeads[leadNum]._id;
+        }
+
+        const p = await Plot.create({
+          plotNumber,
+          projectId: chainProj._id,
+          status: 'Booked',
+          bookedBy,
+        });
+        chainPlots.push(p);
+      }
+
+      // 1. Filtered request matching ONLY the first plot: search=CHAIN-01
+      const resFiltered = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&search=CHAIN-01')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(resFiltered.status).toBe(200);
+      expect(resFiltered.body.total).toBe(1);
+      expect(resFiltered.body.totalPlots).toBe(1); // Only CHAIN-01 matches the search filter
+      expect(resFiltered.body.data.length).toBe(1);
+
+      const customerFiltered = resFiltered.body.data[0];
+      expect(customerFiltered.plotNumber).toBe('CHAIN-01');
+      expect(customerFiltered.matchingPlotCount).toBe(1);
+      expect(customerFiltered.relatedBookingCount).toBe(25);
+      expect(customerFiltered.relatedBookings.length).toBe(25);
+
+      // 2. Unfiltered request scoped to this project: all 25 plots match
+      const resUnfiltered = await request(app)
+        .get(`/api/v1/plots?groupBy=customer&status=Booked&projectId=${chainProj._id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(resUnfiltered.status).toBe(200);
+      expect(resUnfiltered.body.total).toBe(1);
+      expect(resUnfiltered.body.totalPlots).toBe(25); // All 25 match project
+      expect(resUnfiltered.body.data.length).toBe(1);
+
+      const customerUnfiltered = resUnfiltered.body.data[0];
+      expect(customerUnfiltered.matchingPlotCount).toBe(25);
+      expect(customerUnfiltered.relatedBookingCount).toBe(25);
+      expect(customerUnfiltered.relatedBookings.length).toBe(25);
+
+      // 3. Both requests return equal sets of related bookings
+      const filteredPlotNumbers = customerFiltered.relatedBookings
+        .map((b) => String(b.plotNumber))
+        .sort();
+      const unfilteredPlotNumbers = customerUnfiltered.relatedBookings
+        .map((b) => String(b.plotNumber))
+        .sort();
+      expect(filteredPlotNumbers).toEqual(unfilteredPlotNumbers);
+      expect(filteredPlotNumbers.length).toBe(25);
+      expect(filteredPlotNumbers[0]).toBe('CHAIN-01');
+      expect(filteredPlotNumbers[24]).toBe('CHAIN-25');
+    });
+
+    it('8. should propagate lead-lookup failure as an observable error instead of silently swallowing or returning partial success', async () => {
+      const failLead = await Lead.create({
+        customerName: 'Inject Fail Cust',
+        phone: '9988776655',
+        displayId: 'L-FAIL-TEST',
+      });
+
+      await Plot.create({
+        plotNumber: 'INJECT-FAIL-1',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: failLead.customerName,
+          phone: failLead.phone,
+          leadId: failLead._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Inject a failure into Lead.find
+      const leadFindSpy = jest.spyOn(Lead, 'find').mockImplementationOnce(() => {
+        throw new Error('Simulated database connection failure in Lead.find');
+      });
+
+      const res = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&search=INJECT-FAIL-1')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      leadFindSpy.mockRestore();
+
+      // Must produce an observable 500 error, never a 200 with partial count
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
+
+      // Also verify attachRelatedBookings directly rejects when Lead.find throws
+      const directSpy = jest.spyOn(Lead, 'find').mockImplementationOnce(() => {
+        throw new Error('Direct Lead.find failure');
+      });
+      await expect(
+        attachRelatedBookings([
+          {
+            _id: new mongoose.Types.ObjectId(),
+            status: 'Booked',
+            leadInfo: { displayId: 'L-DIRECT-FAIL' },
+          },
+        ])
+      ).rejects.toThrow('Direct Lead.find failure');
+      directSpy.mockRestore();
+    });
+
+    it('9. should return an explicit failure when operational discovery limit is exceeded', async () => {
+      const dummyPlot = {
+        _id: new mongoose.Types.ObjectId(),
+        status: 'Booked',
+        bookedBy: { phone: '9888800001' },
+      };
+
+      await expect(
+        attachRelatedBookings([dummyPlot], { maxDiscoveryRounds: 0 })
+      ).rejects.toThrow('Related booking discovery exceeded maximum operational limit of 0 rounds');
     });
   });
 });

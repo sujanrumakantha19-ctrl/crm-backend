@@ -146,8 +146,17 @@ async function attachRelatedBookings(plots, options = {}) {
   const queriedDisplayIds = new Set();
   const queriedNames = new Set();
 
-  const MAX_ITERATIONS = 10;
-  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+  const MAX_DISCOVERY_ROUNDS =
+    options.maxDiscoveryRounds !== undefined ? Number(options.maxDiscoveryRounds) : 1000;
+  let iter = 0;
+  while (true) {
+    iter++;
+    if (iter > MAX_DISCOVERY_ROUNDS) {
+      throw new Error(
+        `Related booking discovery exceeded maximum operational limit of ${MAX_DISCOVERY_ROUNDS} rounds`
+      );
+    }
+
     const newLeadIds = new Set();
     const newPhones = new Set();
     const newDisplayIds = new Set();
@@ -188,20 +197,18 @@ async function attachRelatedBookings(plots, options = {}) {
     newDisplayIds.forEach((d) => queriedDisplayIds.add(d));
     newNames.forEach((n) => queriedNames.add(n));
 
-    // Resolve any new displayIds to lead IDs
+    // Resolve any new displayIds to lead IDs without swallowing errors
     if (newDisplayIds.size > 0) {
-      try {
-        const leads = await Lead.find({ displayId: { $in: Array.from(newDisplayIds) } })
-          .select('_id')
-          .lean();
-        leads.forEach((l) => {
-          const lidStr = String(l._id);
-          if (!queriedLeadIds.has(lidStr)) {
-            newLeadIds.add(lidStr);
-            queriedLeadIds.add(lidStr);
-          }
-        });
-      } catch {}
+      const leads = await Lead.find({ displayId: { $in: Array.from(newDisplayIds) } })
+        .select('_id')
+        .lean();
+      leads.forEach((l) => {
+        const lidStr = String(l._id);
+        if (!queriedLeadIds.has(lidStr)) {
+          newLeadIds.add(lidStr);
+          queriedLeadIds.add(lidStr);
+        }
+      });
     }
 
     const or = [];
