@@ -91,30 +91,46 @@ function getEffectiveLoanStage(plot, lead) {
 
 function customerIdentityKeys(plot) {
   const keys = [];
-  const p10 = normPhone10(plot.bookedBy?.phone || plot.leadInfo?.phone);
-  if (p10) keys.push(`p:${p10}`);
+
+  const phoneCandidates = [
+    plot.bookedBy?.phone,
+    plot.leadInfo?.phone,
+    plot.pendingApproval?.phone,
+  ];
+  phoneCandidates.forEach((ph) => {
+    const p10 = normPhone10(ph);
+    if (p10) keys.push(`p:${p10}`);
+  });
 
   const displayId = String(plot.leadInfo?.displayId || '').trim().toUpperCase();
   if (displayId) keys.push(`d:${displayId}`);
 
-  const leadId = String(
-    plot.bookedBy?.leadId ||
-    plot.leadInfo?._id ||
-    plot.leadId ||
-    plot.pendingApproval?.leadId ||
-    ''
-  );
-  if (leadId && isMongoHexId(leadId)) keys.push(`l:${leadId}`);
+  const leadCandidates = [
+    plot.bookedBy?.leadId,
+    plot.leadInfo?._id,
+    plot.leadId,
+    plot.pendingApproval?.leadId,
+  ];
+  leadCandidates.forEach((lid) => {
+    const s = String(lid || '');
+    if (s && isMongoHexId(s)) keys.push(`l:${s}`);
+  });
 
-  if (!p10 && !displayId && !leadId) {
-    const name = String(plot.bookedBy?.name || plot.leadInfo?.customerName || '').toLowerCase().trim();
+  const hasStrongId = keys.some((k) => k.startsWith('p:') || k.startsWith('l:') || k.startsWith('d:'));
+  if (!hasStrongId) {
+    const name = String(
+      plot.bookedBy?.name ||
+      plot.leadInfo?.customerName ||
+      plot.pendingApproval?.customerName ||
+      ''
+    ).toLowerCase().trim();
     if (name) keys.push(`n:${name}`);
   }
 
   if (keys.length === 0) {
     keys.push(`id:${plot._id || plot.id || ''}`);
   }
-  return keys;
+  return Array.from(new Set(keys));
 }
 
 function isAuthorizedForStaff({
@@ -800,23 +816,22 @@ async function queryCustomerGroupedBookings({ user, query = {}, isStaffOnly = fa
   const pagedGroups = customerGroups.slice(startIndex, startIndex + reqLimit);
   const pagedRepresentatives = pagedGroups.map((g) => g.representative);
 
-  // Enrich sibling bookings ONLY on the paged customer representatives
-  const withRelated = await attachRelatedBookings(
-    pagedRepresentatives,
-    isStaffRole && staffAccessOr
-      ? {
-          staffAccessOr,
-          isAuthorizedForStaff: (plot) =>
+  // Enrich sibling bookings seeded with all matching members of each paged customer group
+  const withRelated = await attachRelatedBookings(pagedRepresentatives, {
+    groupMembers: pagedGroups.map((g) => g.matchingPlots),
+    staffAccessOr: isStaffRole && staffAccessOr ? staffAccessOr : undefined,
+    isAuthorizedForStaff:
+      isStaffRole && staffUserIdStr
+        ? (plot) =>
             isAuthorizedForStaff({
               plot,
               staffUserIdStr,
               staffUserDisplayId: user.displayId,
               staffLeadIdSet,
               staffPlotIdSet,
-            }),
-        }
-      : {}
-  );
+            })
+        : undefined,
+  });
 
   const paginatedData = withRelated.map((plot, idx) => ({
     ...plot,

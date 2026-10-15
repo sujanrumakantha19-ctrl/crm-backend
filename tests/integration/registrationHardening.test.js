@@ -938,4 +938,393 @@ describe('Registration Search, Filters & Grouped Pagination Hardening', () => {
       expect(resBank.body.error).toMatch(/must be a scalar string/i);
     });
   });
+
+  // ─── 8. One Remaining Related-Booking Fix Acceptance Tests ─────────
+  describe('8. One Remaining Related-Booking Fix Acceptance Tests', () => {
+    it('1. should discover all three plots in A-B-C connection (A-B phone, B-C lead)', async () => {
+      const leadBC = await Lead.create({
+        customerName: 'Cust ABC Full',
+        phone: '9222200002',
+        displayId: 'L-8811',
+      });
+
+      // Plot A: shares phone P1 with B, has no leadId
+      await Plot.create({
+        plotNumber: 'REL-A1',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Cust ABC Full',
+          phone: '9222200001',
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Plot B: shares phone P1 with A, shares leadId with C
+      await Plot.create({
+        plotNumber: 'REL-B1',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Cust ABC Full',
+          phone: '9222200001',
+          leadId: leadBC._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Plot C: shares leadId with B, has different phone
+      await Plot.create({
+        plotNumber: 'REL-C1',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Cust ABC Full',
+          phone: '9222200003',
+          leadId: leadBC._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      const res = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&search=REL-')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(1);
+      expect(res.body.totalPlots).toBe(3);
+      expect(res.body.data.length).toBe(1);
+
+      const customerRow = res.body.data[0];
+      expect(customerRow.matchingPlotCount).toBe(3);
+      expect(customerRow.relatedBookingCount).toBe(3);
+      expect(customerRow.relatedBookings.length).toBe(3);
+
+      const plotNumbers = customerRow.relatedBookings.map((b) => String(b.plotNumber));
+      expect(plotNumbers).toContain('REL-A1');
+      expect(plotNumbers).toContain('REL-B1');
+      expect(plotNumbers).toContain('REL-C1');
+    });
+
+    it('2. should discover transitive related bookings even when filters match only some bookings', async () => {
+      const leadBC2 = await Lead.create({
+        customerName: 'Cust Partial Filter',
+        phone: '9333300002',
+        displayId: 'L-8822',
+      });
+
+      // Plot A: CASH, phone P1
+      await Plot.create({
+        plotNumber: 'FILT-A',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Cust Partial Filter',
+          phone: '9333300001',
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Plot B: CASH, phone P1, leadBC2
+      await Plot.create({
+        plotNumber: 'FILT-B',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Cust Partial Filter',
+          phone: '9333300001',
+          leadId: leadBC2._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Plot C: LOAN (does NOT match CASH filter!), leadBC2
+      await Plot.create({
+        plotNumber: 'FILT-C',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Cust Partial Filter',
+          phone: '9333300003',
+          leadId: leadBC2._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'LOAN',
+          bank: 'HDFC Bank',
+        },
+      });
+
+      // Filter by CASH: only FILT-A and FILT-B match the filter
+      const res = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&paymentMethod=CASH&search=FILT-')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(1);
+      expect(res.body.totalPlots).toBe(2); // Only 2 match CASH filter
+      expect(res.body.data.length).toBe(1);
+
+      const customerRow = res.body.data[0];
+      expect(customerRow.matchingPlotCount).toBe(2);
+      // All 3 related bookings are discovered transitively!
+      expect(customerRow.relatedBookingCount).toBe(3);
+      expect(customerRow.relatedBookings.length).toBe(3);
+
+      const plotNumbers = customerRow.relatedBookings.map((b) => String(b.plotNumber));
+      expect(plotNumbers).toContain('FILT-A');
+      expect(plotNumbers).toContain('FILT-B');
+      expect(plotNumbers).toContain('FILT-C');
+    });
+
+    it('3. should discover mixed Booked and Registered related bookings', async () => {
+      // Plot A is Booked, Plot B is Registered
+      await Plot.create({
+        plotNumber: 'MIX-BOOKED',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Cust Mixed Status',
+          phone: '9444400001',
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      await Plot.create({
+        plotNumber: 'MIX-REG',
+        projectId: projectA._id,
+        status: 'Registered',
+        registrationDate: '2026-03-01',
+        bookedBy: {
+          name: 'Cust Mixed Status',
+          phone: '9444400001',
+          paymentStatus: 'Fully Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Query upcoming/Booked plots
+      const res = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&search=9444400001')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(1);
+      expect(res.body.totalPlots).toBe(1); // Only MIX-BOOKED matches status=Booked
+
+      const customerRow = res.body.data[0];
+      expect(customerRow.matchingPlotCount).toBe(1);
+      expect(customerRow.relatedBookingCount).toBe(2);
+
+      const statuses = customerRow.relatedBookings.map((b) => b.status);
+      expect(statuses).toContain('Booked');
+      expect(statuses).toContain('Registered');
+    });
+
+    it('4. should keep connected booking owned exclusively by another staff member excluded', async () => {
+      // Plot A owned by staff1
+      await Plot.create({
+        plotNumber: 'STF1-OWNED',
+        projectId: projectA._id,
+        status: 'Booked',
+        assignedTo: staff1User._id,
+        bookedBy: {
+          name: 'Cust Staff Split',
+          phone: '9555500001',
+          staffId: staff1User._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Plot B shares phone with A, but owned exclusively by staff2
+      await Plot.create({
+        plotNumber: 'STF2-OWNED',
+        projectId: projectA._id,
+        status: 'Booked',
+        assignedTo: staff2User._id,
+        bookedBy: {
+          name: 'Cust Staff Split',
+          phone: '9555500001',
+          staffId: staff2User._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Staff 1 queries their bookings
+      const res = await request(app)
+        .get('/api/v1/plots/my-bookings?groupBy=customer&status=Booked&search=STF1-OWNED')
+        .set('Authorization', `Bearer ${staff1Token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(1);
+      const customerRow = res.body.data[0];
+      expect(customerRow.relatedBookingCount).toBe(1);
+
+      const plotNumbers = customerRow.relatedBookings.map((b) => String(b.plotNumber));
+      expect(plotNumbers).toContain('STF1-OWNED');
+      expect(plotNumbers).not.toContain('STF2-OWNED');
+    });
+
+    it('5. should handle duplicate identifiers and cycles producing no duplicate bookings or endless discovery', async () => {
+      const cycleLead = await Lead.create({
+        customerName: 'Cust Cycle',
+        phone: '9666600001',
+        displayId: 'L-CYC1',
+      });
+
+      // A, B, C all share the same phone and lead
+      await Plot.create({
+        plotNumber: 'CYC-1',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Cust Cycle',
+          phone: '9666600001',
+          leadId: cycleLead._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+      await Plot.create({
+        plotNumber: 'CYC-2',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Cust Cycle',
+          phone: '9666600001',
+          leadId: cycleLead._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+      await Plot.create({
+        plotNumber: 'CYC-3',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Cust Cycle',
+          phone: '9666600001',
+          leadId: cycleLead._id,
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      const res = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&search=9666600001')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(1);
+      expect(res.body.totalPlots).toBe(3);
+
+      const customerRow = res.body.data[0];
+      expect(customerRow.relatedBookingCount).toBe(3);
+      expect(customerRow.relatedBookings.length).toBe(3);
+
+      const uniqueIds = new Set(customerRow.relatedBookings.map((b) => String(b.id)));
+      expect(uniqueIds.size).toBe(3);
+    });
+
+    it('6. should keep multiple customer groups separate across pagination', async () => {
+      // Customer Alpha (2 plots)
+      await Plot.create({
+        plotNumber: 'PAG-A1',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Alpha Customer',
+          phone: '9777700011',
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+      await Plot.create({
+        plotNumber: 'PAG-A2',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Alpha Customer',
+          phone: '9777700011',
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Customer Beta (2 plots)
+      await Plot.create({
+        plotNumber: 'PAG-B1',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Beta Customer',
+          phone: '9777700022',
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+      await Plot.create({
+        plotNumber: 'PAG-B2',
+        projectId: projectA._id,
+        status: 'Booked',
+        bookedBy: {
+          name: 'Beta Customer',
+          phone: '9777700022',
+          paymentStatus: 'Advance Paid',
+          paymentMethod: 'CASH',
+        },
+      });
+
+      // Page 1 with limit=1: exactly 1 customer group returned
+      const resPage1 = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&limit=1&page=1&search=PAG-')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(resPage1.status).toBe(200);
+      expect(resPage1.body.total).toBe(2);
+      expect(resPage1.body.totalPlots).toBe(4);
+      expect(resPage1.body.data.length).toBe(1);
+
+      const rowPage1 = resPage1.body.data[0];
+      expect(rowPage1.relatedBookingCount).toBe(2);
+      const plotsP1 = rowPage1.relatedBookings.map((b) => String(b.plotNumber));
+      const isAlphaP1 = plotsP1.includes('PAG-A1');
+      if (isAlphaP1) {
+        expect(plotsP1).toEqual(expect.arrayContaining(['PAG-A1', 'PAG-A2']));
+        expect(plotsP1).not.toContain('PAG-B1');
+        expect(plotsP1).not.toContain('PAG-B2');
+      } else {
+        expect(plotsP1).toEqual(expect.arrayContaining(['PAG-B1', 'PAG-B2']));
+        expect(plotsP1).not.toContain('PAG-A1');
+        expect(plotsP1).not.toContain('PAG-A2');
+      }
+
+      // Page 2 with limit=1: exactly the second customer group returned
+      const resPage2 = await request(app)
+        .get('/api/v1/plots?groupBy=customer&status=Booked&limit=1&page=2&search=PAG-')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(resPage2.status).toBe(200);
+      expect(resPage2.body.data.length).toBe(1);
+
+      const rowPage2 = resPage2.body.data[0];
+      expect(rowPage2.relatedBookingCount).toBe(2);
+      const plotsP2 = rowPage2.relatedBookings.map((b) => String(b.plotNumber));
+      if (isAlphaP1) {
+        expect(plotsP2).toEqual(expect.arrayContaining(['PAG-B1', 'PAG-B2']));
+        expect(plotsP2).not.toContain('PAG-A1');
+        expect(plotsP2).not.toContain('PAG-A2');
+      } else {
+        expect(plotsP2).toEqual(expect.arrayContaining(['PAG-A1', 'PAG-A2']));
+        expect(plotsP2).not.toContain('PAG-B1');
+        expect(plotsP2).not.toContain('PAG-B2');
+      }
+    });
+  });
 });
